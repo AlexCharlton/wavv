@@ -18,6 +18,7 @@
 //!         Data::BitDepth8(samples) => println!("{:?}", samples),
 //!         Data::BitDepth16(samples) => println!("{:?}", samples),
 //!         Data::BitDepth24(samples) => println!("{:?}", samples),
+//!         Data::Float32(samples) => println!("{:?}", samples),
 //!     }
 //! }
 //! ```
@@ -36,6 +37,10 @@
 //!
 //! // Iterate as i32 samples (preserving original values)
 //! let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
+//!
+//! // You can also work with 32-bit float WAV files directly
+//! let wav_float = Wav::from_data(Data::Float32(vec![0.5, -0.5, 1.0, -1.0]), 48_000, 2);
+//! let float_samples: Vec<f32> = wav_float.iter_as::<f32>().collect();
 //! ```
 //!
 //! Incremental reading with PartialWav (requires "embedded" feature):
@@ -77,7 +82,7 @@
 //!
 //! fn main() {
 //!     // Enjoy the silence
-//!     let data = Data::BitDepth16(vec![0; 480_000]);
+//!     let data = Data::Float32(vec![0.0; 480_000]);
 //! 	let wav = Wav::from_data(data, 48_000, 2);
 //!
 //!     let path = Path::new("output.wav");
@@ -102,7 +107,7 @@ pub use chunk::{Chunk, ChunkTag};
 pub use conversion::FromWavSample;
 pub use data::Data;
 pub use error::Error;
-pub use fmt::Fmt;
+pub use fmt::{AudioFormat, Fmt};
 pub use wav::{Wav, WavIterator};
 
 #[cfg(feature = "embedded")]

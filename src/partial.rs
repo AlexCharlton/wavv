@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, ChunkTag};
 use crate::conversion::FromWavSample;
 use crate::error::Error;
-use crate::fmt::Fmt;
+use crate::fmt::{AudioFormat, Fmt};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::convert::TryInto;
@@ -150,6 +150,33 @@ where
                     sample
                 };
                 T::from_i32(sample)
+            }
+            32 => {
+                let sample = if self.read_pos + 3 < self.buffer_size {
+                    // No wrap-around needed
+                    let sample = f32::from_le_bytes([
+                        self.buffer[self.read_pos],
+                        self.buffer[self.read_pos + 1],
+                        self.buffer[self.read_pos + 2],
+                        self.buffer[self.read_pos + 3],
+                    ]);
+                    self.read_pos = (self.read_pos + 4) % self.buffer_size;
+                    self.data_available -= 4;
+                    sample
+                } else {
+                    // Wrap-around needed
+                    let bytes = [
+                        self.buffer[self.read_pos],
+                        self.buffer[(self.read_pos + 1) % self.buffer_size],
+                        self.buffer[(self.read_pos + 2) % self.buffer_size],
+                        self.buffer[(self.read_pos + 3) % self.buffer_size],
+                    ];
+                    let sample = f32::from_le_bytes(bytes);
+                    self.read_pos = (self.read_pos + 4) % self.buffer_size;
+                    self.data_available -= 4;
+                    sample
+                };
+                T::from_f32(sample)
             }
             _ => {
                 return Err(ReadError::Parser(Error::UnsupportedBitDepth(
@@ -308,7 +335,30 @@ where
                         id: chunk_tag,
                         bytes: chunk_data,
                     };
-                    fmt = Some(Fmt::from_chunk(&chunk)?);
+                    let parsed_fmt = Fmt::from_chunk(&chunk)?;
+
+                    // Validate audio format compatibility
+                    match parsed_fmt.audio_format {
+                        AudioFormat::Pcm => {
+                            if parsed_fmt.bit_depth != 8
+                                && parsed_fmt.bit_depth != 16
+                                && parsed_fmt.bit_depth != 24
+                            {
+                                return Err(ReadError::Parser(Error::UnsupportedBitDepth(
+                                    parsed_fmt.bit_depth,
+                                )));
+                            }
+                        }
+                        AudioFormat::IeeeFloat => {
+                            if parsed_fmt.bit_depth != 32 {
+                                return Err(ReadError::Parser(Error::UnsupportedFormat(
+                                    parsed_fmt.audio_format.to_u16(),
+                                )));
+                            }
+                        }
+                    }
+
+                    fmt = Some(parsed_fmt);
                     found_fmt = true;
 
                     // Move past this chunk
@@ -487,6 +537,61 @@ mod tests {
         }
 
         assert_eq!(samples_read, original_samples);
+    }
+
+    #[test]
+    fn test_32bit_float_audio() {
+        // Test with 32-bit float audio
+        let original_samples = vec![0.0, 0.5, -0.5, 1.0, -1.0, 0.25, -0.25];
+        let wav = crate::Wav::from_data(Data::Float32(original_samples.clone()), 96_000, 2);
+        let bytes = wav.to_bytes();
+
+        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(partial_wav.fmt.bit_depth, 32);
+        assert_eq!(partial_wav.fmt.num_channels, 2);
+
+        // Test reading as f32 (original format)
+        let iterator = partial_wav.iter_data::<f32>();
+        let mut samples_read = vec![];
+        for result in iterator {
+            match result {
+                Ok(sample) => samples_read.push(sample),
+                Err(e) => panic!("Error reading 32-bit float sample: {:?}", e),
+            }
+        }
+
+        assert_eq!(samples_read, original_samples);
+
+        // Test reading as f64 (converted)
+        let partial_wav_f64 = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_f64 = partial_wav_f64.iter_data::<f64>();
+        let mut f64_samples = vec![];
+        for result in iterator_f64 {
+            match result {
+                Ok(sample) => f64_samples.push(sample),
+                Err(e) => panic!("Error reading f64 sample: {:?}", e),
+            }
+        }
+
+        let expected_f64: Vec<f64> = original_samples.iter().map(|&s| s as f64).collect();
+        assert_eq!(f64_samples, expected_f64);
+
+        // Test reading as i16 (converted)
+        let partial_wav_i16 = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_i16 = partial_wav_i16.iter_data::<i16>();
+        let mut i16_samples = vec![];
+        for result in iterator_i16 {
+            match result {
+                Ok(sample) => i16_samples.push(sample),
+                Err(e) => panic!("Error reading i16 sample: {:?}", e),
+            }
+        }
+
+        let expected_i16: Vec<i16> = original_samples
+            .iter()
+            .map(|&s| (s * 32767.5).clamp(-32767.5, 32767.5) as i16)
+            .collect();
+        assert_eq!(i16_samples, expected_i16);
     }
 
     #[test]

@@ -24,6 +24,7 @@ fn main() {
         Data::BitDepth8(samples) => println!("{:?}", samples),
         Data::BitDepth16(samples) => println!("{:?}", samples),
         Data::BitDepth24(samples) => println!("{:?}", samples),
+        Data::Float32(samples) => println!("{:?}", samples),
     }
 }
 ```

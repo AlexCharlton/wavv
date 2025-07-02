@@ -13,6 +13,8 @@ pub enum Data {
     BitDepth16(Vec<i16>),
     /// 24 bit audio
     BitDepth24(Vec<i32>),
+    /// 32 bit float audio
+    Float32(Vec<f32>),
 }
 
 impl Data {
@@ -21,6 +23,7 @@ impl Data {
             8 => Ok(Data::BitDepth8(vec![])),
             16 => Ok(Data::BitDepth16(vec![])),
             24 => Ok(Data::BitDepth24(vec![])),
+            32 => Ok(Data::Float32(vec![])),
             _ => Err(Error::UnsupportedBitDepth(fmt.bit_depth)),
         }?;
 
@@ -45,6 +48,16 @@ impl Data {
                         chunk.bytes[pos + 1],
                         chunk.bytes[pos + 2],
                         sign_byte,
+                    ]);
+
+                    s.push(sample);
+                }
+                Data::Float32(s) => {
+                    let sample = f32::from_le_bytes([
+                        chunk.bytes[pos],
+                        chunk.bytes[pos + 1],
+                        chunk.bytes[pos + 2],
+                        chunk.bytes[pos + 3],
                     ]);
 
                     s.push(sample);
@@ -77,6 +90,12 @@ impl Data {
                     bytes.extend_from_slice(&[b[0], b[1], b[2]]);
                 }
             }
+            Data::Float32(samples) => {
+                for s in samples {
+                    let b = s.to_le_bytes();
+                    bytes.extend_from_slice(&b);
+                }
+            }
         }
 
         Chunk {
@@ -91,6 +110,7 @@ impl Data {
             Data::BitDepth8(s) => s.len(),
             Data::BitDepth16(s) => s.len(),
             Data::BitDepth24(s) => s.len(),
+            Data::Float32(s) => s.len(),
         }
     }
 }
@@ -99,6 +119,7 @@ impl Data {
 mod tests {
     #![allow(overflowing_literals)]
     use super::*;
+    use crate::fmt::AudioFormat;
     use alloc::vec;
 
     #[test]
@@ -120,8 +141,21 @@ mod tests {
     }
 
     #[test]
+    fn to_32_bit() {
+        let data = Data::Float32(vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            data.to_chunk().bytes,
+            &[
+                0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x40, 0x40, 0x00, 0x00,
+                0x80, 0x40
+            ]
+        );
+    }
+
+    #[test]
     fn from_8_bit() {
         let fmt = Fmt {
+            audio_format: AudioFormat::Pcm,
             bit_depth: 8,
             sample_rate: 48_000,
             num_channels: 1,
@@ -140,6 +174,7 @@ mod tests {
     #[test]
     fn from_16_bit() {
         let fmt = Fmt {
+            audio_format: AudioFormat::Pcm,
             bit_depth: 16,
             sample_rate: 48_000,
             num_channels: 1,
@@ -160,6 +195,7 @@ mod tests {
     #[test]
     fn from_24_bit() {
         let fmt = Fmt {
+            audio_format: AudioFormat::Pcm,
             bit_depth: 24,
             sample_rate: 48_000,
             num_channels: 1,
@@ -177,5 +213,28 @@ mod tests {
         let data = Data::from_chunk(&fmt, &Chunk::from_bytes(&bytes).unwrap()).unwrap();
 
         assert_eq!(data, Data::BitDepth24(vec![8_388_607, -8_388_608, 1, -1]));
+    }
+
+    #[test]
+    fn from_32_bit() {
+        let fmt = Fmt {
+            audio_format: AudioFormat::IeeeFloat,
+            bit_depth: 32,
+            sample_rate: 48_000,
+            num_channels: 1,
+        };
+
+        let bytes = [
+            0x64, 0x61, 0x74, 0x61, // data
+            0x10, 0x00, 0x00, 0x00, // chunk size
+            0x00, 0x00, 0x80, 0x3f, // sample 1
+            0x00, 0x00, 0x00, 0x40, // sample 2
+            0x00, 0x00, 0x40, 0x40, // sample 3
+            0x00, 0x00, 0x80, 0x40, // sample 4
+        ];
+
+        let data = Data::from_chunk(&fmt, &Chunk::from_bytes(&bytes).unwrap()).unwrap();
+
+        assert_eq!(data, Data::Float32(vec![1.0, 2.0, 3.0, 4.0]));
     }
 }

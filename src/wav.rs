@@ -2,7 +2,7 @@ use crate::chunk::{parse_chunks, Chunk, ChunkTag};
 use crate::conversion::FromWavSample;
 use crate::data::Data;
 use crate::error::Error;
-use crate::fmt::Fmt;
+use crate::fmt::{AudioFormat, Fmt};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -72,13 +72,15 @@ impl Wav {
     /// assert_eq!(wav.fmt.sample_rate, 44_100);
     /// ```
     pub fn from_data(data: Data, sample_rate: usize, num_channels: usize) -> Self {
-        let bit_depth = match &data {
-            Data::BitDepth8(_) => 8,
-            Data::BitDepth16(_) => 16,
-            Data::BitDepth24(_) => 24,
+        let (bit_depth, audio_format) = match &data {
+            Data::BitDepth8(_) => (8, AudioFormat::Pcm),
+            Data::BitDepth16(_) => (16, AudioFormat::Pcm),
+            Data::BitDepth24(_) => (24, AudioFormat::Pcm),
+            Data::Float32(_) => (32, AudioFormat::IeeeFloat),
         };
 
         let fmt = Fmt {
+            audio_format,
             sample_rate: sample_rate as u32,
             num_channels: num_channels as u16,
             bit_depth,
@@ -110,7 +112,7 @@ impl Wav {
     /// Create an iterator over samples converted to a generic numeric type.
     ///
     /// This method allows you to iterate over the WAV samples as any numeric type
-    /// that can be converted from `u8`, `i16`, and `i32` (the base WAV data types).
+    /// that can be converted from `u8`, `i16`, `i32`, and `f32` (the base WAV data types).
     ///
     /// ```
     /// use wavv::{Wav, Data};
@@ -219,6 +221,7 @@ where
             Data::BitDepth8(samples) => T::from_u8(samples[self.index]),
             Data::BitDepth16(samples) => T::from_i16(samples[self.index]),
             Data::BitDepth24(samples) => T::from_i32(samples[self.index]),
+            Data::Float32(samples) => T::from_f32(samples[self.index]),
         };
 
         self.index += 1;
@@ -453,5 +456,60 @@ mod tests {
         let wav_24bit = Wav::from_data(Data::BitDepth24(vec![1_000_000, -1_000_000]), 48_000, 1);
         let i32_samples_24bit: Vec<i32> = wav_24bit.iter_as::<i32>().collect();
         assert_eq!(i32_samples_24bit, vec![1_000_000, -1_000_000]);
+
+        // Test with 32-bit float data
+        let wav_32bit = Wav::from_data(Data::Float32(vec![0.5, -0.5, 1.0, -1.0]), 48_000, 1);
+        let f32_samples_32bit: Vec<f32> = wav_32bit.iter_as::<f32>().collect();
+        assert_eq!(f32_samples_32bit, vec![0.5, -0.5, 1.0, -1.0]);
+
+        // Test conversion from 32-bit float to other types
+        let f64_samples_32bit: Vec<f64> = wav_32bit.iter_as::<f64>().collect();
+        assert_eq!(f64_samples_32bit, vec![0.5, -0.5, 1.0, -1.0]);
+
+        let i16_samples_32bit: Vec<i16> = wav_32bit.iter_as::<i16>().collect();
+        assert_eq!(i16_samples_32bit, vec![16383, -16383, 32767, -32767]);
+
+        // Verify audio format is set correctly
+        assert_eq!(wav_32bit.fmt.audio_format, AudioFormat::IeeeFloat);
+        assert_eq!(wav_8bit.fmt.audio_format, AudioFormat::Pcm);
+        assert_eq!(wav_24bit.fmt.audio_format, AudioFormat::Pcm);
+    }
+
+    #[test]
+    fn parse_wav_32_bit_float() {
+        let bytes: [u8; 60] = [
+            0x52, 0x49, 0x46, 0x46, // RIFF
+            0x34, 0x00, 0x00, 0x00, // chunk size
+            0x57, 0x41, 0x56, 0x45, // WAVE
+            0x66, 0x6d, 0x74, 0x20, // fmt_
+            0x10, 0x00, 0x00, 0x00, // chunk size
+            0x03, 0x00, // audio format (IEEE float)
+            0x02, 0x00, // num channels
+            0x80, 0xbb, 0x00, 0x00, // sample rate
+            0x00, 0xee, 0x02, 0x00, // byte rate
+            0x08, 0x00, // block align
+            0x20, 0x00, // bits per sample
+            0x64, 0x61, 0x74, 0x61, // data
+            0x10, 0x00, 0x00, 0x00, // chunk size
+            0x00, 0x00, 0x80, 0x3f, // sample 1 L (1.0)
+            0x00, 0x00, 0x80, 0xbf, // sample 1 R (-1.0)
+            0x00, 0x00, 0x00, 0x40, // sample 2 L (2.0)
+            0x00, 0x00, 0x00, 0xc0, // sample 2 R (-2.0)
+        ];
+
+        let wav = Wav::from_bytes(&bytes).unwrap();
+
+        assert_eq!(wav.fmt.audio_format, AudioFormat::IeeeFloat);
+        assert_eq!(wav.fmt.sample_rate, 48000);
+        assert_eq!(wav.fmt.bit_depth, 32);
+        assert_eq!(wav.fmt.num_channels, 2);
+
+        assert_eq!(
+            wav.data,
+            Data::Float32(vec![
+                1.0, -1.0, // sample 1 L+R
+                2.0, -2.0, // sample 2 L+R
+            ])
+        );
     }
 }
