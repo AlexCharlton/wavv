@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 /// Enum to hold samples for different bit depths
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Data {
     /// 8 bit audio
     BitDepth8(Vec<u8>),

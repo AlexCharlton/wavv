@@ -19,7 +19,7 @@ pub enum ChunkTag {
 }
 
 impl ChunkTag {
-    fn from_bytes(bytes: &[u8; 4]) -> Self {
+    pub(crate) fn from_bytes(bytes: &[u8; 4]) -> Self {
         match bytes {
             [b'R', b'I', b'F', b'F'] => ChunkTag::Riff,
             [b'f', b'm', b't', b' '] => ChunkTag::Fmt,

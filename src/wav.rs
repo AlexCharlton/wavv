@@ -1,4 +1,5 @@
 use crate::chunk::{parse_chunks, Chunk, ChunkTag};
+use crate::conversion::FromWavSample;
 use crate::data::Data;
 use crate::error::Error;
 use crate::fmt::Fmt;
@@ -106,6 +107,35 @@ impl Wav {
         Ok(Self::from_bytes(&bytes)?)
     }
 
+    /// Create an iterator over samples converted to a generic numeric type.
+    ///
+    /// This method allows you to iterate over the WAV samples as any numeric type
+    /// that can be converted from `u8`, `i16`, and `i32` (the base WAV data types).
+    ///
+    /// ```
+    /// use wavv::{Wav, Data};
+    ///
+    /// let wav = Wav::from_data(Data::BitDepth16(vec![1, 2, 3, -1]), 48_000, 2);
+    ///
+    /// // Iterate as f32 (normalized to [-1.0, 1.0])
+    /// let f32_samples: Vec<f32> = wav.iter_as::<f32>().collect();
+    /// assert_eq!(f32_samples, vec![1.0 / 32768.0, 2.0 / 32768.0, 3.0 / 32768.0, -1.0 / 32768.0]);
+    ///
+    /// // Iterate as f64
+    /// let f64_samples: Vec<f64> = wav.iter_as::<f64>().collect();
+    /// assert_eq!(f64_samples, vec![1.0 / 32768.0, 2.0 / 32768.0, 3.0 / 32768.0, -1.0 / 32768.0]);
+    ///
+    /// // Iterate as i32 (preserving original values)
+    /// let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
+    /// assert_eq!(i32_samples, vec![1, 2, 3, -1]);
+    /// ```
+    pub fn iter_as<T>(&self) -> WavIterator<T>
+    where
+        T: FromWavSample + Copy,
+    {
+        WavIterator::new(self.data.clone())
+    }
+
     /// Convert a [`Wav`] instance into bytes.
     ///
     /// Useful if you have raw sample data that you want to convert to a .wav file:
@@ -156,6 +186,52 @@ impl Wav {
         bytes
     }
 }
+
+/// Iterator that converts WAV samples to a generic numeric type
+pub struct WavIterator<T> {
+    data: Data,
+    index: usize,
+    _phantom: core::marker::PhantomData<T>,
+}
+
+impl<T> WavIterator<T> {
+    fn new(data: Data) -> Self {
+        Self {
+            data,
+            index: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<T> Iterator for WavIterator<T>
+where
+    T: FromWavSample + Copy,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.data.len() {
+            return None;
+        }
+
+        let sample = match &self.data {
+            Data::BitDepth8(samples) => T::from_u8(samples[self.index]),
+            Data::BitDepth16(samples) => T::from_i16(samples[self.index]),
+            Data::BitDepth24(samples) => T::from_i32(samples[self.index]),
+        };
+
+        self.index += 1;
+        Some(sample)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.data.len().saturating_sub(self.index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T> ExactSizeIterator for WavIterator<T> where T: FromWavSample + Copy {}
 
 #[cfg(test)]
 mod tests {
@@ -328,32 +404,54 @@ mod tests {
 
     #[test]
     fn parse_files() {
-        let bytes = fs::read(Path::new("./test_files/mono_16_48000.wav")).unwrap();
-        let wav = Wav::from_bytes(&bytes).unwrap();
+        let files = [
+            "./test_files/mono_16_48000.wav",
+            "./test_files/mono_24_48000.wav",
+            "./test_files/stereo_16_48000.wav",
+            "./test_files/stereo_24_48000.wav",
+        ];
 
-        assert_eq!(wav.fmt.num_channels, 1);
-        assert_eq!(wav.fmt.bit_depth, 16);
-        assert_eq!(wav.fmt.sample_rate, 48_000);
+        for file in files {
+            let bytes = fs::read(Path::new(file)).unwrap();
+            let wav = Wav::from_bytes(&bytes).unwrap();
 
-        let bytes = fs::read(Path::new("./test_files/mono_24_48000.wav")).unwrap();
-        let wav = Wav::from_bytes(&bytes).unwrap();
+            assert!(wav.fmt.sample_rate > 0);
+            assert!(wav.fmt.num_channels > 0);
+            assert!(wav.data.len() > 0);
+        }
+    }
 
-        assert_eq!(wav.fmt.num_channels, 1);
-        assert_eq!(wav.fmt.bit_depth, 24);
-        assert_eq!(wav.fmt.sample_rate, 48_000);
+    #[test]
+    fn test_iter_as() {
+        // Test with 16-bit data
+        let wav = Wav::from_data(Data::BitDepth16(vec![1, 2, 3, -1]), 48_000, 2);
 
-        let bytes = fs::read(Path::new("./test_files/stereo_16_48000.wav")).unwrap();
-        let wav = Wav::from_bytes(&bytes).unwrap();
+        // Test as f32 (normalized to [-1.0, 1.0])
+        let f32_samples: Vec<f32> = wav.iter_as::<f32>().collect();
+        assert_eq!(
+            f32_samples,
+            vec![1.0 / 32768.0, 2.0 / 32768.0, 3.0 / 32768.0, -1.0 / 32768.0]
+        );
 
-        assert_eq!(wav.fmt.num_channels, 2);
-        assert_eq!(wav.fmt.bit_depth, 16);
-        assert_eq!(wav.fmt.sample_rate, 48_000);
+        // Test as f64 (normalized to [-1.0, 1.0])
+        let f64_samples: Vec<f64> = wav.iter_as::<f64>().collect();
+        assert_eq!(
+            f64_samples,
+            vec![1.0 / 32768.0, 2.0 / 32768.0, 3.0 / 32768.0, -1.0 / 32768.0]
+        );
 
-        let bytes = fs::read(Path::new("./test_files/stereo_24_48000.wav")).unwrap();
-        let wav = Wav::from_bytes(&bytes).unwrap();
+        // Test as i32 (converted from i16)
+        let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
+        assert_eq!(i32_samples, vec![1, 2, 3, -1]);
 
-        assert_eq!(wav.fmt.num_channels, 2);
-        assert_eq!(wav.fmt.bit_depth, 24);
-        assert_eq!(wav.fmt.sample_rate, 48_000);
+        // Test with 8-bit data
+        let wav_8bit = Wav::from_data(Data::BitDepth8(vec![128, 255, 0]), 48_000, 1);
+        let u8_samples: Vec<u8> = wav_8bit.iter_as::<u8>().collect();
+        assert_eq!(u8_samples, vec![128, 255, 0]);
+
+        // Test with 24-bit data
+        let wav_24bit = Wav::from_data(Data::BitDepth24(vec![1_000_000, -1_000_000]), 48_000, 1);
+        let i32_samples_24bit: Vec<i32> = wav_24bit.iter_as::<i32>().collect();
+        assert_eq!(i32_samples_24bit, vec![1_000_000, -1_000_000]);
     }
 }

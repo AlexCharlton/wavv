@@ -1,0 +1,577 @@
+use crate::chunk::{Chunk, ChunkTag};
+use crate::conversion::FromWavSample;
+use crate::error::Error;
+use crate::fmt::Fmt;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::convert::TryInto;
+
+use crate::error::ReadError;
+
+/// Iterator for reading WAV data incrementally from a reader
+pub struct PartialWavIterator<T, R> {
+    reader: R,
+    fmt: Fmt,
+    bytes_per_sample: usize,
+    buffer: Vec<u8>,
+    buffer_size: usize,
+    read_pos: usize,       // Position where we read new data from reader
+    write_pos: usize,      // Position where we write new data to buffer
+    data_available: usize, // Amount of data available in buffer
+    _phantom: core::marker::PhantomData<T>,
+}
+
+impl<T, R> PartialWavIterator<T, R>
+where
+    R: embedded_io::Read,
+    T: FromWavSample + Copy,
+{
+    fn new(reader: R, fmt: Fmt, buffer_size: usize, audio_data: Vec<u8>) -> Self {
+        let bytes_per_sample = (fmt.bit_depth / 8) as usize;
+        let mut buffer = vec![0; buffer_size];
+
+        // Copy initial audio data into the circular buffer
+        let initial_data_len = audio_data.len().min(buffer_size);
+        buffer[..initial_data_len].copy_from_slice(&audio_data[..initial_data_len]);
+
+        Self {
+            reader,
+            fmt,
+            bytes_per_sample,
+            buffer,
+            buffer_size,
+            read_pos: 0,
+            write_pos: initial_data_len % buffer_size,
+            data_available: initial_data_len,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    fn read_more_data(&mut self) -> Result<bool, ReadError<R::Error>> {
+        // Calculate how much space is available in the buffer
+        let space_available = self.buffer_size - self.data_available;
+
+        if space_available == 0 {
+            // Buffer is full, we need to wait for more data to be consumed
+            return Ok(false);
+        }
+
+        // Calculate how much we can read
+        let read_amount = if self.write_pos >= self.read_pos {
+            // Write position is ahead of read position
+            let space_to_end = self.buffer_size - self.write_pos;
+            space_to_end.min(space_available)
+        } else {
+            // Write position is behind read position
+            (self.read_pos - self.write_pos).min(space_available)
+        };
+
+        if read_amount == 0 {
+            return Ok(false);
+        }
+
+        // Read data into the buffer
+        let slice = &mut self.buffer[self.write_pos..self.write_pos + read_amount];
+
+        match self.reader.read(slice) {
+            Ok(0) => Ok(false),
+            Ok(n) => {
+                self.write_pos = (self.write_pos + n) % self.buffer_size;
+                self.data_available += n;
+
+                Ok(true)
+            }
+            Err(e) => Err(ReadError::Reader(e)),
+        }
+    }
+
+    fn read_sample(&mut self) -> Result<Option<T>, ReadError<R::Error>> {
+        // Ensure we have enough data for a complete sample
+        while self.data_available < self.bytes_per_sample {
+            if !self.read_more_data()? {
+                return Ok(None); // EOF
+            }
+        }
+
+        let sample = match self.fmt.bit_depth {
+            8 => {
+                let sample = self.buffer[self.read_pos];
+                self.read_pos = (self.read_pos + 1) % self.buffer_size;
+                self.data_available -= 1;
+                T::from_u8(sample)
+            }
+            16 => {
+                let sample = if self.read_pos + 1 < self.buffer_size {
+                    // No wrap-around needed
+                    let sample = i16::from_le_bytes([
+                        self.buffer[self.read_pos],
+                        self.buffer[self.read_pos + 1],
+                    ]);
+                    self.read_pos = (self.read_pos + 2) % self.buffer_size;
+                    self.data_available -= 2;
+                    sample
+                } else {
+                    // Wrap-around needed
+                    let sample = i16::from_le_bytes([self.buffer[self.read_pos], self.buffer[0]]);
+                    self.read_pos = 1;
+                    self.data_available -= 2;
+                    sample
+                };
+                T::from_i16(sample)
+            }
+            24 => {
+                let sample = if self.read_pos + 2 < self.buffer_size {
+                    // No wrap-around needed
+                    let sign = self.buffer[self.read_pos + 2] >> 7;
+                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
+                    let sample = i32::from_le_bytes([
+                        self.buffer[self.read_pos],
+                        self.buffer[self.read_pos + 1],
+                        self.buffer[self.read_pos + 2],
+                        sign_byte,
+                    ]);
+                    self.read_pos = (self.read_pos + 3) % self.buffer_size;
+                    self.data_available -= 3;
+                    sample
+                } else {
+                    // Wrap-around needed
+                    let bytes = [
+                        self.buffer[self.read_pos],
+                        self.buffer[(self.read_pos + 1) % self.buffer_size],
+                        self.buffer[(self.read_pos + 2) % self.buffer_size],
+                    ];
+                    let sign = bytes[2] >> 7;
+                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
+                    let sample = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], sign_byte]);
+                    self.read_pos = (self.read_pos + 3) % self.buffer_size;
+                    self.data_available -= 3;
+                    // println!("read_sample: 24-bit sample={} (wrap-around), new read_pos={}, data_available={}",
+                    //          sample, self.read_pos, self.data_available);
+                    sample
+                };
+                T::from_i32(sample)
+            }
+            _ => {
+                return Err(ReadError::Parser(Error::UnsupportedBitDepth(
+                    self.fmt.bit_depth,
+                )))
+            }
+        };
+
+        Ok(Some(sample))
+    }
+}
+
+impl<T, R> Iterator for PartialWavIterator<T, R>
+where
+    R: embedded_io::Read,
+    T: FromWavSample + Copy,
+{
+    type Item = Result<T, ReadError<R::Error>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.read_sample() {
+            Ok(Some(sample)) => Some(Ok(sample)),
+            Ok(None) => None, // EOF
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// Partial WAV struct that only contains format information
+/// and allows incremental reading of audio data
+pub struct PartialWav<R> {
+    /// Contains data from the fmt chunk / header part of the file
+    pub fmt: Fmt,
+    /// The reader for reading additional audio data (if any)
+    reader: R,
+    /// Audio data that was already read during format parsing
+    audio_data: Vec<u8>,
+    /// Buffer size for incremental reading
+    buffer_size: usize,
+}
+
+impl<R> PartialWav<R>
+where
+    R: embedded_io::Read,
+{
+    /// Create a partial WAV from a reader, only reading the format information
+    pub fn from_reader(mut reader: R, buffer_size: usize) -> Result<Self, ReadError<R::Error>> {
+        // Read data into a buffer for chunk parsing
+        let mut parse_buffer = vec![0; buffer_size];
+        let mut total_read = 0;
+
+        // Read initial data to find RIFF header
+        let mut initial_read = 0;
+        while initial_read < 12 {
+            match reader.read(&mut parse_buffer[initial_read..]) {
+                Ok(0) => return Err(ReadError::Parser(Error::NoRiffChunkFound)),
+                Ok(n) => {
+                    initial_read += n;
+                    total_read += n;
+                }
+                Err(e) => return Err(ReadError::Reader(e)),
+            }
+        }
+        let mut buffer_pos = 12;
+
+        // Verify RIFF header
+        if &parse_buffer[0..4] != b"RIFF" {
+            return Err(ReadError::Parser(Error::NoRiffChunkFound));
+        }
+
+        // Verify WAVE identifier
+        if &parse_buffer[8..12] != b"WAVE" {
+            return Err(ReadError::Parser(Error::NoWaveTagFound));
+        }
+
+        let mut found_fmt = false;
+        let mut found_data = false;
+        let mut fmt = None;
+        let mut audio_data = vec![];
+
+        // Parse chunks from the buffer
+        while !found_fmt || !found_data {
+            // Ensure we have enough data for chunk header
+            if buffer_pos + 8 > total_read {
+                let needed = buffer_pos + 8 - total_read;
+                let available = buffer_size - total_read;
+                let to_read = needed.min(available);
+
+                if to_read == 0 {
+                    // Buffer is full, we need to shift data
+                    let shift_amount = buffer_pos;
+                    parse_buffer.copy_within(shift_amount..total_read, 0);
+                    total_read -= shift_amount;
+                    buffer_pos = 0;
+
+                    // Read more data
+                    let to_read = (buffer_size - total_read).min(needed);
+                    match reader.read(&mut parse_buffer[total_read..total_read + to_read]) {
+                        Ok(0) => break, // EOF
+                        Ok(n) => total_read += n,
+                        Err(e) => return Err(ReadError::Reader(e)),
+                    }
+                } else {
+                    match reader.read(&mut parse_buffer[total_read..total_read + to_read]) {
+                        Ok(0) => break, // EOF
+                        Ok(n) => total_read += n,
+                        Err(e) => return Err(ReadError::Reader(e)),
+                    }
+                }
+            }
+
+            // Parse chunk header
+            let chunk_tag =
+                ChunkTag::from_bytes(&parse_buffer[buffer_pos..buffer_pos + 4].try_into().unwrap());
+            let chunk_size = u32::from_le_bytes(
+                parse_buffer[buffer_pos + 4..buffer_pos + 8]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+
+            match chunk_tag {
+                ChunkTag::Fmt => {
+                    // Ensure we have enough data for fmt chunk
+                    if buffer_pos + 8 + chunk_size > total_read {
+                        let needed = buffer_pos + 8 + chunk_size - total_read;
+                        let available = buffer_size - total_read;
+                        let to_read = needed.min(available);
+
+                        if to_read == 0 {
+                            // Buffer is full, we need to shift data
+                            let shift_amount = buffer_pos;
+                            parse_buffer.copy_within(shift_amount..total_read, 0);
+                            total_read -= shift_amount;
+                            buffer_pos = 0;
+
+                            // Read more data
+                            let to_read = (buffer_size - total_read).min(needed);
+                            match reader.read(&mut parse_buffer[total_read..total_read + to_read]) {
+                                Ok(0) => return Err(ReadError::Parser(Error::NoFmtChunkFound)),
+                                Ok(n) => total_read += n,
+                                Err(e) => return Err(ReadError::Reader(e)),
+                            }
+                        } else {
+                            match reader.read(&mut parse_buffer[total_read..total_read + to_read]) {
+                                Ok(0) => return Err(ReadError::Parser(Error::NoFmtChunkFound)),
+                                Ok(n) => total_read += n,
+                                Err(e) => return Err(ReadError::Reader(e)),
+                            }
+                        }
+                    }
+
+                    // Parse fmt chunk
+                    let chunk_data =
+                        parse_buffer[buffer_pos + 8..buffer_pos + 8 + chunk_size].to_vec();
+                    let chunk = Chunk {
+                        id: chunk_tag,
+                        bytes: chunk_data,
+                    };
+                    fmt = Some(Fmt::from_chunk(&chunk)?);
+                    found_fmt = true;
+
+                    // Move past this chunk
+                    buffer_pos += 8 + chunk_size;
+
+                    // Handle padding
+                    if chunk_size % 2 == 1 {
+                        buffer_pos += 1;
+                    }
+                }
+                ChunkTag::Data => {
+                    // Found data chunk - store remaining buffer data as audio_data
+                    found_data = true;
+                    audio_data = parse_buffer[buffer_pos + 8..total_read].to_vec();
+                    break;
+                }
+                _ => {
+                    // Skip other chunks
+                    buffer_pos += 8 + chunk_size;
+
+                    // Handle padding
+                    if chunk_size % 2 == 1 {
+                        buffer_pos += 1;
+                    }
+                }
+            }
+        }
+
+        if !found_fmt {
+            return Err(ReadError::Parser(Error::NoFmtChunkFound));
+        }
+        if !found_data {
+            return Err(ReadError::Parser(Error::NoDataChunkFound));
+        }
+
+        Ok(PartialWav {
+            fmt: fmt.unwrap(),
+            reader,
+            audio_data,
+            buffer_size,
+        })
+    }
+
+    /// Create a partial WAV from a reader with a default buffer size
+    pub fn from_reader_default(reader: R) -> Result<Self, ReadError<R::Error>> {
+        Self::from_reader(reader, 4096) // Default 4KB buffer
+    }
+
+    /// Create an iterator for reading audio data incrementally
+    pub fn iter_data<T>(self) -> PartialWavIterator<T, R>
+    where
+        T: FromWavSample + Copy,
+    {
+        PartialWavIterator::new(self.reader, self.fmt, self.buffer_size, self.audio_data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::Data;
+    use alloc::vec;
+
+    #[test]
+    fn test_partial_wav_creation() {
+        // Create a simple WAV file in memory
+        let wav = crate::Wav::from_data(Data::BitDepth16(vec![1, 2, 3, -1]), 48_000, 2);
+        let bytes = wav.to_bytes();
+
+        // Create partial WAV
+        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+
+        assert_eq!(partial_wav.fmt.sample_rate, 48_000);
+        assert_eq!(partial_wav.fmt.num_channels, 2);
+        assert_eq!(partial_wav.fmt.bit_depth, 16);
+    }
+
+    #[test]
+    fn test_incremental_reading() {
+        // Create a WAV file with known samples
+        let original_samples = vec![1, 2, 3, -1, 5, 6, 7, 8];
+        let wav = crate::Wav::from_data(Data::BitDepth16(original_samples.clone()), 48_000, 2);
+        let bytes = wav.to_bytes();
+
+        // Create partial WAV
+        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+
+        // Verify format information is correct
+        assert_eq!(partial_wav.fmt.sample_rate, 48_000);
+        assert_eq!(partial_wav.fmt.num_channels, 2);
+        assert_eq!(partial_wav.fmt.bit_depth, 16);
+
+        // Create iterator for reading audio data
+        let iterator = partial_wav.iter_data::<i16>();
+
+        // Read all samples and verify they match the original
+        let mut samples_read = vec![];
+        for result in iterator {
+            match result {
+                Ok(sample) => samples_read.push(sample),
+                Err(e) => panic!("Error reading sample: {:?}", e),
+            }
+        }
+
+        // Verify we got the expected number of samples
+        assert_eq!(samples_read.len(), original_samples.len());
+
+        // Verify the samples match the original data
+        assert_eq!(samples_read, original_samples);
+
+        // Test with f32 conversion
+        let partial_wav_f32 = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_f32 = partial_wav_f32.iter_data::<f32>();
+
+        let mut f32_samples = vec![];
+        for result in iterator_f32 {
+            match result {
+                Ok(sample) => f32_samples.push(sample),
+                Err(e) => panic!("Error reading f32 sample: {:?}", e),
+            }
+        }
+
+        // Verify f32 samples are normalized correctly
+        assert_eq!(f32_samples.len(), original_samples.len());
+
+        // Check that f32 samples are properly normalized
+        let expected_f32: Vec<f32> = original_samples
+            .iter()
+            .map(|&s| s as f32 / 32768.0)
+            .collect();
+
+        assert_eq!(f32_samples, expected_f32);
+    }
+
+    #[test]
+    fn test_8bit_audio() {
+        // Test with 8-bit audio
+        let original_samples = vec![128, 255, 0, 64, 192];
+        let wav = crate::Wav::from_data(Data::BitDepth8(original_samples.clone()), 44_100, 1);
+        let bytes = wav.to_bytes();
+
+        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(partial_wav.fmt.bit_depth, 8);
+        assert_eq!(partial_wav.fmt.num_channels, 1);
+
+        let iterator = partial_wav.iter_data::<u8>();
+        let mut samples_read = vec![];
+        for result in iterator {
+            match result {
+                Ok(sample) => samples_read.push(sample),
+                Err(e) => panic!("Error reading 8-bit sample: {:?}", e),
+            }
+        }
+
+        assert_eq!(samples_read, original_samples);
+    }
+
+    #[test]
+    fn test_24bit_audio() {
+        // Test with 24-bit audio
+        let original_samples = vec![1_000_000, -1_000_000, 500_000, -500_000];
+        let wav = crate::Wav::from_data(Data::BitDepth24(original_samples.clone()), 96_000, 2);
+        let bytes = wav.to_bytes();
+
+        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(partial_wav.fmt.bit_depth, 24);
+        assert_eq!(partial_wav.fmt.num_channels, 2);
+
+        let iterator = partial_wav.iter_data::<i32>();
+        let mut samples_read = vec![];
+        for result in iterator {
+            match result {
+                Ok(sample) => samples_read.push(sample),
+                Err(e) => panic!("Error reading 24-bit sample: {:?}", e),
+            }
+        }
+
+        assert_eq!(samples_read, original_samples);
+    }
+
+    #[test]
+    fn test_with_real_files() {
+        let files_16 = [
+            "./test_files/mono_16_48000.wav",
+            "./test_files/stereo_16_48000.wav",
+        ];
+        let files_24 = [
+            "./test_files/mono_24_48000.wav",
+            "./test_files/stereo_24_48000.wav",
+        ];
+
+        for file in files_16 {
+            let bytes = std::fs::read(std::path::Path::new(file)).unwrap();
+
+            // Test PartialWav creation
+            let partial_wav = PartialWav::from_reader(&bytes[..], 1024).unwrap();
+
+            // Verify format information is correct
+            assert!(partial_wav.fmt.sample_rate > 0);
+            assert!(partial_wav.fmt.num_channels > 0);
+            assert!(partial_wav.fmt.bit_depth > 0);
+
+            // Test that we can read samples
+            let iterator = partial_wav.iter_data::<i16>();
+            let mut samples = vec![];
+            for result in iterator {
+                match result {
+                    Ok(_sample) => {
+                        samples.push(_sample);
+                    }
+                    Err(e) => panic!("Error reading sample from {}: {:?}", file, e),
+                }
+            }
+
+            // Verify we got some samples
+            assert!(samples.len() > 0, "No samples read from {}", file);
+
+            // Parse with regular Wav
+            let wav = crate::Wav::from_bytes(&bytes).unwrap();
+            match wav.data {
+                Data::BitDepth16(regular_samples) => {
+                    assert_eq!(samples.len(), regular_samples.len());
+                    assert_eq!(samples, regular_samples);
+                }
+                _ => panic!("Expected 16-bit audio"),
+            }
+        }
+
+        for file in files_24 {
+            let bytes = std::fs::read(std::path::Path::new(file)).unwrap();
+
+            // Test PartialWav creation
+            let partial_wav = PartialWav::from_reader(&bytes[..], 1024).unwrap();
+
+            // Verify format information is correct
+            assert!(partial_wav.fmt.sample_rate > 0);
+            assert!(partial_wav.fmt.num_channels > 0);
+            assert!(partial_wav.fmt.bit_depth > 0);
+
+            // Test that we can read samples
+            let iterator = partial_wav.iter_data::<i32>();
+            let mut samples = vec![];
+            for result in iterator {
+                match result {
+                    Ok(_sample) => {
+                        samples.push(_sample);
+                    }
+                    Err(e) => panic!("Error reading sample from {}: {:?}", file, e),
+                }
+            }
+
+            // Verify we got some samples
+            assert!(samples.len() > 0, "No samples read from {}", file);
+
+            // Parse with regular Wav
+            let wav = crate::Wav::from_bytes(&bytes).unwrap();
+            match wav.data {
+                Data::BitDepth24(regular_samples) => {
+                    assert_eq!(samples.len(), regular_samples.len());
+                    assert_eq!(samples, regular_samples);
+                }
+                _ => panic!("Expected 24-bit audio"),
+            }
+        }
+    }
+}

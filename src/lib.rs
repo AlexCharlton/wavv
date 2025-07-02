@@ -22,6 +22,52 @@
 //! }
 //! ```
 //!
+//! Using the generic iterator to convert samples to different types:
+//! ```
+//! use wavv::{Wav, Data};
+//!
+//! let wav = Wav::from_data(Data::BitDepth16(vec![1, 2, 3, -1]), 48_000, 2);
+//!
+//! // Iterate as normalized f32 samples ([-1.0, 1.0])
+//! let f32_samples: Vec<f32> = wav.iter_as::<f32>().collect();
+//!
+//! // Iterate as normalized f64 samples ([-1.0, 1.0])
+//! let f64_samples: Vec<f64> = wav.iter_as::<f64>().collect();
+//!
+//! // Iterate as i32 samples (preserving original values)
+//! let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
+//! ```
+//!
+//! Incremental reading with PartialWav (requires "embedded" feature):
+//! ```
+//! use std::fs;
+//! use wavv::{PartialWav, FromWavSample};
+//!
+//! #[cfg(feature = "embedded")]
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let file_bytes = fs::read("./test_files/stereo_16_48000.wav")?;
+//!
+//!     // Only read the format information initially
+//!     let partial_wav = PartialWav::from_reader_default(&file_bytes[..]).unwrap();
+//!
+//!     println!("Sample rate: {}", partial_wav.fmt.sample_rate);
+//!     println!("Channels: {}", partial_wav.fmt.num_channels);
+//!     println!("Bit depth: {}", partial_wav.fmt.bit_depth);
+//!
+//!     // Now read audio data incrementally
+//!     let mut samples = vec![];
+//!
+//!     for result in partial_wav.iter_data::<f32>() {
+//!         match result {
+//!             Ok(sample) => samples.push(sample),
+//!             Err(e) => panic!("Error: {:?}", e),
+//!         }
+//!     }
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
 //! Writing a WAV file:
 //! ```
 //! use std::fs::File;
@@ -46,13 +92,20 @@
 extern crate alloc;
 
 mod chunk;
+mod conversion;
 mod data;
 mod error;
 mod fmt;
 mod wav;
 
 pub use chunk::{Chunk, ChunkTag};
+pub use conversion::FromWavSample;
 pub use data::Data;
 pub use error::Error;
 pub use fmt::Fmt;
-pub use wav::Wav;
+pub use wav::{Wav, WavIterator};
+
+#[cfg(feature = "embedded")]
+mod partial;
+#[cfg(feature = "embedded")]
+pub use partial::{PartialWav, PartialWavIterator};
