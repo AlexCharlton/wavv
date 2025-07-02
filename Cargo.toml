@@ -8,3 +8,10 @@ repository = "https://github.com/samuelleeuwenburg/wavv"
 documentation = "https://docs.rs/wavv"
 license = "Apache-2.0"
 keywords = ["audio", "wav", "no_std"]
+
+[features]
+default = ["embedded"]
+embedded = ["embedded-io"]
+
+[dependencies]
+embedded-io = { version = "0.6", optional = true }

@@ -5,6 +5,9 @@ use crate::fmt::Fmt;
 use alloc::vec;
 use alloc::vec::Vec;
 
+#[cfg(feature = "embedded")]
+use crate::error::ReadError;
+
 /// Struct representing a WAV file
 pub struct Wav {
     /// Contains data from the fmt chunk / header part of the file
@@ -85,6 +88,22 @@ impl Wav {
             fmt,
             chunks: vec![],
         }
+    }
+
+    /// Create a [`Wav`] instance from a reader.
+    #[cfg(feature = "embedded")]
+    pub fn from_reader<R: embedded_io::Read>(reader: &mut R) -> Result<Self, ReadError<R::Error>> {
+        let mut bytes = vec![];
+        loop {
+            let mut tmp = [0; 512];
+            match reader.read(&mut tmp) {
+                Ok(0) => break,
+                Ok(n) => bytes.extend(&tmp[..n]),
+                Err(e) => return Err(ReadError::Reader(e)),
+            }
+        }
+
+        Ok(Self::from_bytes(&bytes)?)
     }
 
     /// Convert a [`Wav`] instance into bytes.

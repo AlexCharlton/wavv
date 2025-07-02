@@ -22,3 +22,17 @@ pub enum Error {
     /// Unsupported format
     UnsupportedFormat(u16),
 }
+
+#[cfg(feature = "embedded")]
+#[derive(Debug, PartialEq)]
+pub enum ReadError<E> {
+    /// Error from the underlying reader
+    Reader(E),
+    /// Error from the parser
+    Parser(Error),
+}
+impl<E> From<Error> for ReadError<E> {
+    fn from(e: Error) -> Self {
+        ReadError::Parser(e)
+    }
+}
