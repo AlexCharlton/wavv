@@ -9,7 +9,7 @@ use core::convert::TryInto;
 use crate::error::ReadError;
 
 /// Iterator for reading WAV data incrementally from a reader
-pub struct PartialWavIterator<T, R> {
+pub struct IncrementalWavIterator<T, R> {
     reader: R,
     fmt: Fmt,
     bytes_per_sample: usize,
@@ -21,7 +21,7 @@ pub struct PartialWavIterator<T, R> {
     _phantom: core::marker::PhantomData<T>,
 }
 
-impl<T, R> PartialWavIterator<T, R>
+impl<T, R> IncrementalWavIterator<T, R>
 where
     R: embedded_io::Read,
     T: FromWavSample + Copy,
@@ -189,7 +189,7 @@ where
     }
 }
 
-impl<T, R> Iterator for PartialWavIterator<T, R>
+impl<T, R> Iterator for IncrementalWavIterator<T, R>
 where
     R: embedded_io::Read,
     T: FromWavSample + Copy,
@@ -205,9 +205,9 @@ where
     }
 }
 
-/// Partial WAV struct that only contains format information
+/// Incremental WAV struct that only contains format information
 /// and allows incremental reading of audio data
-pub struct PartialWav<R> {
+pub struct IncrementalWav<R> {
     /// Contains data from the fmt chunk / header part of the file
     pub fmt: Fmt,
     /// The reader for reading additional audio data (if any)
@@ -218,11 +218,11 @@ pub struct PartialWav<R> {
     buffer_size: usize,
 }
 
-impl<R> PartialWav<R>
+impl<R> IncrementalWav<R>
 where
     R: embedded_io::Read,
 {
-    /// Create a partial WAV from a reader, only reading the format information
+    /// Create a incremental WAV from a reader, only reading the format information
     pub fn from_reader(mut reader: R, buffer_size: usize) -> Result<Self, ReadError<R::Error>> {
         // Read data into a buffer for chunk parsing
         let mut parse_buffer = vec![0; buffer_size];
@@ -394,7 +394,7 @@ where
             return Err(ReadError::Parser(Error::NoDataChunkFound));
         }
 
-        Ok(PartialWav {
+        Ok(IncrementalWav {
             fmt: fmt.unwrap(),
             reader,
             audio_data,
@@ -402,23 +402,23 @@ where
         })
     }
 
-    /// Create a partial WAV from a reader with a default buffer size
+    /// Create a incremental WAV from a reader with a default buffer size
     pub fn from_reader_default(reader: R) -> Result<Self, ReadError<R::Error>> {
         Self::from_reader(reader, 4096) // Default 4KB buffer
     }
 
     /// Create an iterator for reading audio data incrementally
-    pub fn iter_data<T>(self) -> PartialWavIterator<T, R>
+    pub fn iter_data<T>(self) -> IncrementalWavIterator<T, R>
     where
         T: FromWavSample + Copy,
     {
-        PartialWavIterator::new(self.reader, self.fmt, self.buffer_size, self.audio_data)
+        IncrementalWavIterator::new(self.reader, self.fmt, self.buffer_size, self.audio_data)
     }
 }
 
 #[cfg(feature = "std")]
-impl PartialWav<File> {
-    /// Create a partial WAV from a file path.
+impl IncrementalWav<File> {
+    /// Create a incremental WAV from a file path.
     pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, ReadError<FileError>> {
         let file = std::fs::File::open(path).map_err(|e| ReadError::Reader(FileError(e)))?;
         Self::from_reader(File(file), 4096)
@@ -462,17 +462,17 @@ mod tests {
     use alloc::vec;
 
     #[test]
-    fn test_partial_wav_creation() {
+    fn test_incremental_wav_creation() {
         // Create a simple WAV file in memory
         let wav = crate::Wav::from_data(Data::BitDepth16(vec![1, 2, 3, -1]), 48_000, 2);
         let bytes = wav.to_bytes();
 
-        // Create partial WAV
-        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        // Create incremental WAV
+        let incremental_wav = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
 
-        assert_eq!(partial_wav.fmt.sample_rate, 48_000);
-        assert_eq!(partial_wav.fmt.num_channels, 2);
-        assert_eq!(partial_wav.fmt.bit_depth, 16);
+        assert_eq!(incremental_wav.fmt.sample_rate, 48_000);
+        assert_eq!(incremental_wav.fmt.num_channels, 2);
+        assert_eq!(incremental_wav.fmt.bit_depth, 16);
     }
 
     #[test]
@@ -482,16 +482,16 @@ mod tests {
         let wav = crate::Wav::from_data(Data::BitDepth16(original_samples.clone()), 48_000, 2);
         let bytes = wav.to_bytes();
 
-        // Create partial WAV
-        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
+        // Create incremental WAV
+        let incremental_wav = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
 
         // Verify format information is correct
-        assert_eq!(partial_wav.fmt.sample_rate, 48_000);
-        assert_eq!(partial_wav.fmt.num_channels, 2);
-        assert_eq!(partial_wav.fmt.bit_depth, 16);
+        assert_eq!(incremental_wav.fmt.sample_rate, 48_000);
+        assert_eq!(incremental_wav.fmt.num_channels, 2);
+        assert_eq!(incremental_wav.fmt.bit_depth, 16);
 
         // Create iterator for reading audio data
-        let iterator = partial_wav.iter_data::<i16>();
+        let iterator = incremental_wav.iter_data::<i16>();
 
         // Read all samples and verify they match the original
         let mut samples_read = vec![];
@@ -509,8 +509,8 @@ mod tests {
         assert_eq!(samples_read, original_samples);
 
         // Test with f32 conversion
-        let partial_wav_f32 = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        let iterator_f32 = partial_wav_f32.iter_data::<f32>();
+        let incremental_wav_f32 = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_f32 = incremental_wav_f32.iter_data::<f32>();
 
         let mut f32_samples = vec![];
         for result in iterator_f32 {
@@ -539,11 +539,11 @@ mod tests {
         let wav = crate::Wav::from_data(Data::BitDepth8(original_samples.clone()), 44_100, 1);
         let bytes = wav.to_bytes();
 
-        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        assert_eq!(partial_wav.fmt.bit_depth, 8);
-        assert_eq!(partial_wav.fmt.num_channels, 1);
+        let incremental_wav = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(incremental_wav.fmt.bit_depth, 8);
+        assert_eq!(incremental_wav.fmt.num_channels, 1);
 
-        let iterator = partial_wav.iter_data::<u8>();
+        let iterator = incremental_wav.iter_data::<u8>();
         let mut samples_read = vec![];
         for result in iterator {
             match result {
@@ -562,11 +562,11 @@ mod tests {
         let wav = crate::Wav::from_data(Data::BitDepth24(original_samples.clone()), 96_000, 2);
         let bytes = wav.to_bytes();
 
-        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        assert_eq!(partial_wav.fmt.bit_depth, 24);
-        assert_eq!(partial_wav.fmt.num_channels, 2);
+        let incremental_wav = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(incremental_wav.fmt.bit_depth, 24);
+        assert_eq!(incremental_wav.fmt.num_channels, 2);
 
-        let iterator = partial_wav.iter_data::<i32>();
+        let iterator = incremental_wav.iter_data::<i32>();
         let mut samples_read = vec![];
         for result in iterator {
             match result {
@@ -585,12 +585,12 @@ mod tests {
         let wav = crate::Wav::from_data(Data::Float32(original_samples.clone()), 96_000, 2);
         let bytes = wav.to_bytes();
 
-        let partial_wav = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        assert_eq!(partial_wav.fmt.bit_depth, 32);
-        assert_eq!(partial_wav.fmt.num_channels, 2);
+        let incremental_wav = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        assert_eq!(incremental_wav.fmt.bit_depth, 32);
+        assert_eq!(incremental_wav.fmt.num_channels, 2);
 
         // Test reading as f32 (original format)
-        let iterator = partial_wav.iter_data::<f32>();
+        let iterator = incremental_wav.iter_data::<f32>();
         let mut samples_read = vec![];
         for result in iterator {
             match result {
@@ -602,8 +602,8 @@ mod tests {
         assert_eq!(samples_read, original_samples);
 
         // Test reading as f64 (converted)
-        let partial_wav_f64 = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        let iterator_f64 = partial_wav_f64.iter_data::<f64>();
+        let incremental_wav_f64 = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_f64 = incremental_wav_f64.iter_data::<f64>();
         let mut f64_samples = vec![];
         for result in iterator_f64 {
             match result {
@@ -616,8 +616,8 @@ mod tests {
         assert_eq!(f64_samples, expected_f64);
 
         // Test reading as i16 (converted)
-        let partial_wav_i16 = PartialWav::from_reader_default(&bytes[..]).unwrap();
-        let iterator_i16 = partial_wav_i16.iter_data::<i16>();
+        let incremental_wav_i16 = IncrementalWav::from_reader_default(&bytes[..]).unwrap();
+        let iterator_i16 = incremental_wav_i16.iter_data::<i16>();
         let mut i16_samples = vec![];
         for result in iterator_i16 {
             match result {
@@ -646,17 +646,17 @@ mod tests {
         ];
 
         for file in files_16 {
-            // Test PartialWav creation
+            // Test IncrementalWav creation
             let path = std::path::Path::new(file);
-            let partial_wav = PartialWav::from_file(path).unwrap();
+            let incremental_wav = IncrementalWav::from_file(path).unwrap();
 
             // Verify format information is correct
-            assert!(partial_wav.fmt.sample_rate > 0);
-            assert!(partial_wav.fmt.num_channels > 0);
-            assert!(partial_wav.fmt.bit_depth > 0);
+            assert!(incremental_wav.fmt.sample_rate > 0);
+            assert!(incremental_wav.fmt.num_channels > 0);
+            assert!(incremental_wav.fmt.bit_depth > 0);
 
             // Test that we can read samples
-            let iterator = partial_wav.iter_data::<i16>();
+            let iterator = incremental_wav.iter_data::<i16>();
             let mut samples = vec![];
             for result in iterator {
                 match result {
@@ -683,17 +683,17 @@ mod tests {
         }
 
         for file in files_24 {
-            // Test PartialWav creation
+            // Test IncrementalWav creation
             let path = std::path::Path::new(file);
-            let partial_wav = PartialWav::from_file(path).unwrap();
+            let incremental_wav = IncrementalWav::from_file(path).unwrap();
 
             // Verify format information is correct
-            assert!(partial_wav.fmt.sample_rate > 0);
-            assert!(partial_wav.fmt.num_channels > 0);
-            assert!(partial_wav.fmt.bit_depth > 0);
+            assert!(incremental_wav.fmt.sample_rate > 0);
+            assert!(incremental_wav.fmt.num_channels > 0);
+            assert!(incremental_wav.fmt.bit_depth > 0);
 
             // Test that we can read samples
-            let iterator = partial_wav.iter_data::<i32>();
+            let iterator = incremental_wav.iter_data::<i32>();
             let mut samples = vec![];
             for result in iterator {
                 match result {

@@ -43,26 +43,26 @@
 //! let float_samples: Vec<f32> = wav_float.iter_as::<f32>().collect();
 //! ```
 //!
-//! Incremental reading with PartialWav (requires "embedded" feature):
+//! Incremental reading with [IncrementalWav] (requires "io" feature):
 //! ```
 //! use std::fs;
 //!
-//! #[cfg(feature = "embedded")]
+//! #[cfg(feature = "io")]
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!
 //!     let file_bytes = fs::read("./test_files/stereo_16_48000.wav")?;
 //!
 //!     // Only read the format information initially
-//!     let partial_wav = wavv::PartialWav::from_reader_default(&file_bytes[..]).unwrap();
+//!     let incremental_wav = wavv::IncrementalWav::from_reader_default(&file_bytes[..]).unwrap();
 //!
-//!     println!("Sample rate: {}", partial_wav.fmt.sample_rate);
-//!     println!("Channels: {}", partial_wav.fmt.num_channels);
-//!     println!("Bit depth: {}", partial_wav.fmt.bit_depth);
+//!     println!("Sample rate: {}", incremental_wav.fmt.sample_rate);
+//!     println!("Channels: {}", incremental_wav.fmt.num_channels);
+//!     println!("Bit depth: {}", incremental_wav.fmt.bit_depth);
 //!
 //!     // Now read audio data incrementally
 //!     let mut samples = vec![];
 //!
-//!     for result in partial_wav.iter_data::<f32>() {
+//!     for result in incremental_wav.iter_data::<f32>() {
 //!         match result {
 //!             Ok(sample) => samples.push(sample),
 //!             Err(e) => panic!("Error: {:?}", e),
@@ -72,7 +72,7 @@
 //!     Ok(())
 //! }
 //!
-//! # #[cfg(not(feature = "embedded"))]
+//! # #[cfg(not(feature = "io"))]
 //! # fn main() {}
 //! ```
 //!
@@ -113,7 +113,7 @@ pub use error::Error;
 pub use fmt::{AudioFormat, Fmt};
 pub use wav::{Wav, WavIterator};
 
-#[cfg(feature = "embedded")]
-mod partial;
-#[cfg(feature = "embedded")]
-pub use partial::{PartialWav, PartialWavIterator};
+#[cfg(feature = "io")]
+mod incremental;
+#[cfg(feature = "io")]
+pub use incremental::{IncrementalWav, IncrementalWavIterator};

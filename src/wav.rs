@@ -6,7 +6,7 @@ use crate::fmt::{AudioFormat, Fmt};
 use alloc::vec;
 use alloc::vec::Vec;
 
-#[cfg(feature = "embedded")]
+#[cfg(feature = "io")]
 use crate::error::ReadError;
 
 /// Struct representing a WAV file
@@ -94,7 +94,7 @@ impl Wav {
     }
 
     /// Create a [`Wav`] instance from a reader.
-    #[cfg(feature = "embedded")]
+    #[cfg(feature = "io")]
     pub fn from_reader<R: embedded_io::Read>(reader: &mut R) -> Result<Self, ReadError<R::Error>> {
         let mut bytes = vec![];
         loop {

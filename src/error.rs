@@ -23,7 +23,7 @@ pub enum Error {
     UnsupportedFormat(u16),
 }
 
-#[cfg(feature = "embedded")]
+#[cfg(feature = "io")]
 #[derive(Debug, PartialEq)]
 pub enum ReadError<E> {
     /// Error from the underlying reader
@@ -32,7 +32,7 @@ pub enum ReadError<E> {
     Parser(Error),
 }
 
-#[cfg(feature = "embedded")]
+#[cfg(feature = "io")]
 impl<E> From<Error> for ReadError<E> {
     fn from(e: Error) -> Self {
         ReadError::Parser(e)
