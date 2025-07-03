@@ -11,6 +11,7 @@ keywords = ["audio", "wav", "no_std"]
 
 [features]
 default = []
+std = ["embedded"]
 embedded = ["embedded-io"]
 
 [dependencies]

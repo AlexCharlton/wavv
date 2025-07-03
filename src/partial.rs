@@ -416,6 +416,45 @@ where
     }
 }
 
+#[cfg(feature = "std")]
+impl PartialWav<File> {
+    /// Create a partial WAV from a file path.
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, ReadError<FileError>> {
+        let file = std::fs::File::open(path).map_err(|e| ReadError::Reader(FileError(e)))?;
+        Self::from_reader(File(file), 4096)
+    }
+}
+
+#[cfg(feature = "std")]
+mod file_wrapper {
+    use std::fs;
+    use std::io::Read;
+
+    pub struct File(pub fs::File);
+
+    #[derive(Debug)]
+    pub struct FileError(pub std::io::Error);
+
+    impl embedded_io::Error for FileError {
+        fn kind(&self) -> embedded_io::ErrorKind {
+            embedded_io::ErrorKind::Other
+        }
+    }
+
+    impl embedded_io::ErrorType for File {
+        type Error = FileError;
+    }
+
+    impl embedded_io::Read for File {
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            self.0.read(buf).map_err(|e| FileError(e))
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+use file_wrapper::*;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +633,7 @@ mod tests {
         assert_eq!(i16_samples, expected_i16);
     }
 
+    #[cfg(feature = "std")]
     #[test]
     fn test_with_real_files() {
         let files_16 = [
@@ -606,10 +646,9 @@ mod tests {
         ];
 
         for file in files_16 {
-            let bytes = std::fs::read(std::path::Path::new(file)).unwrap();
-
             // Test PartialWav creation
-            let partial_wav = PartialWav::from_reader(&bytes[..], 1024).unwrap();
+            let path = std::path::Path::new(file);
+            let partial_wav = PartialWav::from_file(path).unwrap();
 
             // Verify format information is correct
             assert!(partial_wav.fmt.sample_rate > 0);
@@ -632,6 +671,7 @@ mod tests {
             assert!(samples.len() > 0, "No samples read from {}", file);
 
             // Parse with regular Wav
+            let bytes = std::fs::read(path).unwrap();
             let wav = crate::Wav::from_bytes(&bytes).unwrap();
             match wav.data {
                 Data::BitDepth16(regular_samples) => {
@@ -643,10 +683,9 @@ mod tests {
         }
 
         for file in files_24 {
-            let bytes = std::fs::read(std::path::Path::new(file)).unwrap();
-
             // Test PartialWav creation
-            let partial_wav = PartialWav::from_reader(&bytes[..], 1024).unwrap();
+            let path = std::path::Path::new(file);
+            let partial_wav = PartialWav::from_file(path).unwrap();
 
             // Verify format information is correct
             assert!(partial_wav.fmt.sample_rate > 0);
@@ -669,6 +708,8 @@ mod tests {
             assert!(samples.len() > 0, "No samples read from {}", file);
 
             // Parse with regular Wav
+            let bytes = std::fs::read(path).unwrap();
+
             let wav = crate::Wav::from_bytes(&bytes).unwrap();
             match wav.data {
                 Data::BitDepth24(regular_samples) => {
