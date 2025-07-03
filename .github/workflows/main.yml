@@ -18,9 +18,7 @@ jobs:
           override: true
 
       - name: Run cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check --all-targets
+        run: cargo check --all-targets
 
   tests:
     name: Tests
@@ -37,16 +35,10 @@ jobs:
           override: true
 
       - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: cargo test
 
       - name: Run cargo test --features io
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: cargo test --features io
 
       - name: Run cargo test --features std
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: cargo test --features std
