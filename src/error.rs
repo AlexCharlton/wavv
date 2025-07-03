@@ -31,6 +31,8 @@ pub enum ReadError<E> {
     /// Error from the parser
     Parser(Error),
 }
+
+#[cfg(feature = "embedded")]
 impl<E> From<Error> for ReadError<E> {
     fn from(e: Error) -> Self {
         ReadError::Parser(e)

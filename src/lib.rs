@@ -46,14 +46,14 @@
 //! Incremental reading with PartialWav (requires "embedded" feature):
 //! ```
 //! use std::fs;
-//! use wavv::{PartialWav, FromWavSample};
 //!
 //! #[cfg(feature = "embedded")]
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!
 //!     let file_bytes = fs::read("./test_files/stereo_16_48000.wav")?;
 //!
 //!     // Only read the format information initially
-//!     let partial_wav = PartialWav::from_reader_default(&file_bytes[..]).unwrap();
+//!     let partial_wav = wavv::PartialWav::from_reader_default(&file_bytes[..]).unwrap();
 //!
 //!     println!("Sample rate: {}", partial_wav.fmt.sample_rate);
 //!     println!("Channels: {}", partial_wav.fmt.num_channels);
@@ -71,6 +71,9 @@
 //!
 //!     Ok(())
 //! }
+//!
+//! # #[cfg(not(feature = "embedded"))]
+//! # fn main() {}
 //! ```
 //!
 //! Writing a WAV file:

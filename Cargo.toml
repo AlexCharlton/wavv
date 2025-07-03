@@ -10,7 +10,7 @@ license = "Apache-2.0"
 keywords = ["audio", "wav", "no_std"]
 
 [features]
-default = ["embedded"]
+default = []
 embedded = ["embedded-io"]
 
 [dependencies]
