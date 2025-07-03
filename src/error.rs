@@ -25,15 +25,25 @@ pub enum Error {
 
 #[cfg(feature = "io")]
 #[derive(Debug, PartialEq)]
-pub enum ReadError<E> {
+pub enum ReadError<E: core::fmt::Debug> {
     /// Error from the underlying reader
     Reader(E),
     /// Error from the parser
     Parser(Error),
 }
 
+#[cfg(feature = "std")]
+impl<E: core::fmt::Debug> std::error::Error for ReadError<E> {}
+
+#[cfg(feature = "std")]
+impl<E: core::fmt::Debug> std::fmt::Display for ReadError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[cfg(feature = "io")]
-impl<E> From<Error> for ReadError<E> {
+impl<E: core::fmt::Debug> From<Error> for ReadError<E> {
     fn from(e: Error) -> Self {
         ReadError::Parser(e)
     }

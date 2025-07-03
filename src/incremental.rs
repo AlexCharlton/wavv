@@ -430,8 +430,10 @@ mod file_wrapper {
     use std::fs;
     use std::io::Read;
 
+    /// Wrapper for std::fs::File. Will be part of the  type returned by [IncrementalWav::from_file]
     pub struct File(pub fs::File);
 
+    #[doc(hidden)]
     #[derive(Debug)]
     pub struct FileError(pub std::io::Error);
 
@@ -453,7 +455,7 @@ mod file_wrapper {
 }
 
 #[cfg(feature = "std")]
-use file_wrapper::*;
+pub use file_wrapper::{File, FileError};
 
 #[cfg(test)]
 mod tests {

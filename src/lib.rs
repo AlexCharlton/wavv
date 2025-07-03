@@ -115,5 +115,7 @@ pub use wav::{Wav, WavIterator};
 
 #[cfg(feature = "io")]
 mod incremental;
+#[cfg(feature = "std")]
+pub use incremental::{File, FileError};
 #[cfg(feature = "io")]
 pub use incremental::{IncrementalWav, IncrementalWavIterator};
