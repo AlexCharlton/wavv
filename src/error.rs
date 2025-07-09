@@ -17,6 +17,8 @@ pub enum Error {
     NoDataChunkFound,
     /// No fmt/header chunk found
     NoFmtChunkFound,
+    /// Unexpected EOF
+    UnexpectedEof,
     /// Unsupported bit depth
     UnsupportedBitDepth(u16),
     /// Unsupported format
@@ -46,5 +48,17 @@ impl<E: core::fmt::Debug> std::fmt::Display for ReadError<E> {
 impl<E: core::fmt::Debug> From<Error> for ReadError<E> {
     fn from(e: Error) -> Self {
         ReadError::Parser(e)
+    }
+}
+
+#[cfg(feature = "io")]
+impl<E: core::fmt::Debug> From<embedded_io_async::ReadExactError<E>> for ReadError<E> {
+    fn from(e: embedded_io_async::ReadExactError<E>) -> Self {
+        match e {
+            embedded_io_async::ReadExactError::UnexpectedEof => {
+                ReadError::Parser(Error::UnexpectedEof)
+            }
+            embedded_io_async::ReadExactError::Other(e) => ReadError::Reader(e),
+        }
     }
 }

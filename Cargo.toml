@@ -11,11 +11,14 @@ keywords = ["audio", "wav", "no_std"]
 
 [features]
 default = []
-std = ["io", "embedded-io/std"]
-io = ["embedded-io"]
+std = ["io", "embedded-io/std", "embedded-io-async/std"]
+io = ["embedded-io", "embedded-io-async"]
 
 [dependencies]
 embedded-io = { version = "0.6", optional = true }
+embedded-io-async = { version = "0.6", optional = true }
 
 [dev-dependencies]
 embedded-io = { version = "0.6", features = ["std"] }
+embedded-io-async = { version = "0.6", features = ["std"] }
+tokio = { version = "1", features = ["full"] }
