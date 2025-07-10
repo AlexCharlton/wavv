@@ -45,3 +45,10 @@ fn main() {
     file.write_all(&wav.to_bytes()).unwrap();
 }
 ```
+
+## Finalizing this new API
+- Provide `read_*` along with `read_*_from` methods
+- Line up the sync version with the async (drop the iterator)
+- Create `incremental` and `incremental_async` features
+- When `std`, don't use embedded_io traits, use the std ones
+  - Implies a `no_std` trait

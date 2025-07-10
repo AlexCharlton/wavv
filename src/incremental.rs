@@ -803,6 +803,10 @@ pub mod asynch {
                         continue;
                     }
                     ChunkTag::Data => {
+                        if fmt.is_none() {
+                            return Err(ReadError::Parser(Error::NoFmtChunkFound));
+                        }
+
                         data_pos = reader
                             .stream_position()
                             .await
@@ -820,9 +824,6 @@ pub mod asynch {
                 }
             }
 
-            if fmt.is_none() {
-                return Err(ReadError::Parser(Error::NoFmtChunkFound));
-            }
             if data_len == 0 {
                 return Err(ReadError::Parser(Error::NoDataChunkFound));
             }
