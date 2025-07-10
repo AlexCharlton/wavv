@@ -962,6 +962,62 @@ pub mod asynch {
             }
         }
     }
+
+    #[cfg(feature = "std")]
+    mod file_wrapper {
+        use tokio::fs;
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+        /// Wrapper for std::fs::File. Will be part of the  type returned by [IncrementalWav::from_file]
+        pub struct File(pub fs::File);
+
+        #[doc(hidden)]
+        #[derive(Debug)]
+        pub struct FileError(pub std::io::Error);
+
+        impl embedded_io::Error for FileError {
+            fn kind(&self) -> embedded_io::ErrorKind {
+                embedded_io::ErrorKind::Other
+            }
+        }
+
+        impl embedded_io::ErrorType for File {
+            type Error = FileError;
+        }
+
+        impl embedded_io_async::Read for File {
+            async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+                self.0.read(buf).await.map_err(|e| FileError(e))
+            }
+        }
+
+        impl embedded_io_async::Seek for File {
+            async fn seek(&mut self, pos: embedded_io_async::SeekFrom) -> Result<u64, Self::Error> {
+                let pos = match pos {
+                    embedded_io_async::SeekFrom::Start(pos) => std::io::SeekFrom::Start(pos),
+                    embedded_io_async::SeekFrom::Current(pos) => std::io::SeekFrom::Current(pos),
+                    embedded_io_async::SeekFrom::End(pos) => std::io::SeekFrom::End(pos),
+                };
+                self.0.seek(pos).await.map_err(|e| FileError(e))
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    pub use file_wrapper::{File, FileError};
+
+    #[cfg(feature = "std")]
+    impl IncrementalWav<File> {
+        /// Create a incremental WAV from a file path.
+        pub async fn from_file(
+            path: impl AsRef<std::path::Path>,
+        ) -> Result<Self, ReadError<FileError>> {
+            let file = tokio::fs::File::open(path)
+                .await
+                .map_err(|e| ReadError::Reader(FileError(e)))?;
+            Self::from_reader(File(file)).await
+        }
+    }
 }
 
 //-----------------------------------
