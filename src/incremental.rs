@@ -457,11 +457,246 @@ pub use file_wrapper::{File, FileError};
 
 //-----------------------------------
 // MARK: Async
-
 /// Async version of IncrementalWav
 pub mod asynch {
     use super::*;
     use embedded_io_async::SeekFrom;
+
+    trait ReadFromU8: FromWavSample {
+        async fn read_from_u8<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            let mut samples = vec![0; buf.len()];
+            reader
+                .seek(SeekFrom::Start(read_from as u64))
+                .await
+                .map_err(|e| ReadError::Reader(e))?;
+            reader.read_exact(&mut samples).await?;
+            let mut i = 0;
+            while i < buf.len() {
+                buf[i] = Self::from_u8(samples[i]);
+                i += 1;
+            }
+            Ok(())
+        }
+    }
+
+    impl ReadFromU8 for u8 {
+        async fn read_from_u8<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            reader
+                .seek(SeekFrom::Start(read_from as u64))
+                .await
+                .map_err(|e| ReadError::Reader(e))?;
+            reader.read_exact(buf).await?;
+            Ok(())
+        }
+    }
+    impl ReadFromU8 for i16 {}
+    impl ReadFromU8 for i32 {}
+    impl ReadFromU8 for f32 {}
+
+    trait ReadFromI16: FromWavSample {
+        async fn read_from_i16<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            let mut samples = vec![0; buf.len() * 2];
+            reader
+                .seek(SeekFrom::Start(read_from as u64))
+                .await
+                .map_err(|e| ReadError::Reader(e))?;
+            reader.read_exact(&mut samples).await?;
+            let mut i = 0;
+            while i < buf.len() {
+                let i16_i = i * 2;
+                let i16_sample = i16::from_le_bytes([samples[i16_i], samples[i16_i + 1]]);
+                buf[i] = Self::from_i16(i16_sample);
+                i += 1;
+            }
+            Ok(())
+        }
+    }
+
+    impl ReadFromI16 for u8 {}
+    impl ReadFromI16 for i16 {
+        async fn read_from_i16<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            #[cfg(target_endian = "little")]
+            {
+                // Optimized path for little-endian 16-bit reads
+                let bytes = unsafe {
+                    core::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 2)
+                };
+                reader
+                    .seek(SeekFrom::Start(read_from as u64))
+                    .await
+                    .map_err(|e| ReadError::Reader(e))?;
+                reader.read_exact(bytes).await?;
+                Ok(())
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                // Fallback for non-little-endian systems
+                let mut samples = vec![0; buf.len() * 2];
+                reader
+                    .seek(SeekFrom::Start(read_from as u64))
+                    .await
+                    .map_err(|e| ReadError::Reader(e))?;
+                reader.read_exact(&mut samples).await?;
+                let mut i = 0;
+                while i < buf.len() {
+                    let i16_i = i * 2;
+                    buf[i] = i16::from_le_bytes([samples[i16_i], samples[i16_i + 1]]);
+                    i += 1;
+                }
+                Ok(())
+            }
+        }
+    }
+    impl ReadFromI16 for i32 {}
+    impl ReadFromI16 for f32 {}
+
+    trait ReadFromI24: FromWavSample {
+        async fn read_from_i24<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            let mut samples = vec![0; buf.len() * 3];
+            reader
+                .seek(SeekFrom::Start(read_from as u64))
+                .await
+                .map_err(|e| ReadError::Reader(e))?;
+            reader.read_exact(&mut samples).await?;
+            let mut i = 0;
+            while i < buf.len() {
+                let i24_i = i * 3;
+                let sign = samples[i24_i + 2] >> 7;
+                let sign_byte = if sign == 1 { 0xff } else { 0x0 };
+
+                let i32_sample = i32::from_le_bytes([
+                    samples[i24_i],
+                    samples[i24_i + 1],
+                    samples[i24_i + 2],
+                    sign_byte,
+                ]);
+                buf[i] = Self::from_i32(i32_sample);
+                i += 1;
+            }
+            Ok(())
+        }
+    }
+
+    impl ReadFromI24 for u8 {}
+    impl ReadFromI24 for i16 {}
+    impl ReadFromI24 for i32 {}
+    impl ReadFromI24 for f32 {}
+
+    trait ReadFromF32: FromWavSample {
+        async fn read_from_f32<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            let mut samples = vec![0; buf.len() * 4];
+            reader
+                .seek(SeekFrom::Start(read_from as u64))
+                .await
+                .map_err(|e| ReadError::Reader(e))?;
+            reader.read_exact(&mut samples).await?;
+            let mut i = 0;
+            while i < buf.len() {
+                let i32_i = i * 4;
+                let f32_sample = f32::from_le_bytes([
+                    samples[i32_i],
+                    samples[i32_i + 1],
+                    samples[i32_i + 2],
+                    samples[i32_i + 3],
+                ]);
+                buf[i] = Self::from_f32(f32_sample);
+                i += 1;
+            }
+            Ok(())
+        }
+    }
+
+    impl ReadFromF32 for u8 {}
+    impl ReadFromF32 for i16 {}
+    impl ReadFromF32 for i32 {}
+    impl ReadFromF32 for f32 {
+        async fn read_from_f32<R>(
+            reader: &mut R,
+            read_from: usize,
+            buf: &mut [Self],
+        ) -> Result<(), ReadError<R::Error>>
+        where
+            R: embedded_io_async::Read + embedded_io_async::Seek,
+        {
+            #[cfg(target_endian = "little")]
+            {
+                // Optimized path for little-endian 32-bit float reads
+                let bytes = unsafe {
+                    core::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4)
+                };
+                reader
+                    .seek(SeekFrom::Start(read_from as u64))
+                    .await
+                    .map_err(|e| ReadError::Reader(e))?;
+                reader.read_exact(bytes).await?;
+                Ok(())
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                // Fallback for non-little-endian systems
+                let mut samples = vec![0; buf.len() * 4];
+                reader
+                    .seek(SeekFrom::Start(read_from as u64))
+                    .await
+                    .map_err(|e| ReadError::Reader(e))?;
+                reader.read_exact(&mut samples).await?;
+                let mut i = 0;
+                while i < buf.len() {
+                    let i32_i = i * 4;
+                    buf[i] = f32::from_le_bytes([
+                        samples[i32_i],
+                        samples[i32_i + 1],
+                        samples[i32_i + 2],
+                        samples[i32_i + 3],
+                    ]);
+                    i += 1;
+                }
+                Ok(())
+            }
+        }
+    }
 
     /// Async version of IncrementalWav
     pub struct IncrementalWav<R> {
@@ -613,69 +848,13 @@ pub mod asynch {
             buf: &mut [u8],
         ) -> Result<(), ReadError<R::Error>> {
             if self.fmt.bit_depth == 8 {
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(buf).await?;
-                Ok(())
+                u8::read_from_u8(&mut self.reader, self.data_pos + from, buf).await
             } else if self.fmt.bit_depth == 16 {
-                let mut samples = vec![0; buf.len() * 2];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 2) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i16_i = i * 2;
-                    let i16_sample = i16::from_le_bytes([samples[i16_i], samples[i16_i + 1]]);
-                    let u8_sample = u8::from_i16(i16_sample);
-                    buf[i] = u8_sample;
-                    i += 1;
-                }
-                Ok(())
+                u8::read_from_i16(&mut self.reader, self.data_pos + from * 2, buf).await
             } else if self.fmt.bit_depth == 24 {
-                let mut samples = vec![0; buf.len() * 3];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 3) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i24_i = i * 3;
-                    let sign = samples[i24_i + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-
-                    buf[i] = u8::from_i32(i32::from_le_bytes([
-                        samples[i24_i],
-                        samples[i24_i + 1],
-                        samples[i24_i + 2],
-                        sign_byte,
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                u8::read_from_i24(&mut self.reader, self.data_pos + from * 3, buf).await
             } else if self.fmt.bit_depth == 32 {
-                let mut samples = vec![0; buf.len() * 4];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 4) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i32_i = i * 4;
-                    buf[i] = u8::from_f32(f32::from_le_bytes([
-                        samples[i32_i],
-                        samples[i32_i + 1],
-                        samples[i32_i + 2],
-                        samples[i32_i + 3],
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                u8::read_from_f32(&mut self.reader, self.data_pos + from * 4, buf).await
             } else {
                 return Err(ReadError::Parser(Error::UnsupportedFormat(
                     self.fmt.audio_format.to_u16(),
@@ -690,90 +869,13 @@ pub mod asynch {
             buf: &mut [i16],
         ) -> Result<(), ReadError<R::Error>> {
             if self.fmt.bit_depth == 8 {
-                let mut samples = vec![0; buf.len()];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    buf[i] = i16::from_u8(samples[i]);
-                    i += 1;
-                }
-                Ok(())
+                i16::read_from_u8(&mut self.reader, self.data_pos + from, buf).await
             } else if self.fmt.bit_depth == 16 {
-                #[cfg(target_endian = "little")]
-                {
-                    // Optimized path for little-endian 16-bit reads
-                    let bytes = unsafe {
-                        core::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 2)
-                    };
-                    self.reader
-                        .seek(SeekFrom::Start((self.data_pos + from * 2) as u64))
-                        .await
-                        .map_err(|e| ReadError::Reader(e))?;
-                    self.reader.read_exact(bytes).await?;
-                    Ok(())
-                }
-                #[cfg(not(target_endian = "little"))]
-                {
-                    // Fallback for non-little-endian systems
-                    let mut samples = vec![0; buf.len() * 2];
-                    self.reader
-                        .seek(SeekFrom::Start((self.data_pos + from * 2) as u64))
-                        .await
-                        .map_err(|e| ReadError::Reader(e))?;
-                    self.reader.read_exact(&mut samples).await?;
-                    let mut i = 0;
-                    while i < buf.len() {
-                        let i16_i = i * 2;
-                        buf[i] = i16::from_le_bytes([samples[i16_i], samples[i16_i + 1]]);
-                        i += 1;
-                    }
-                    Ok(())
-                }
+                i16::read_from_i16(&mut self.reader, self.data_pos + from * 2, buf).await
             } else if self.fmt.bit_depth == 24 {
-                let mut samples = vec![0; buf.len() * 3];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 3) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i24_i = i * 3;
-                    let sign = samples[i24_i + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-
-                    buf[i] = i16::from_i32(i32::from_le_bytes([
-                        samples[i24_i],
-                        samples[i24_i + 1],
-                        samples[i24_i + 2],
-                        sign_byte,
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                i16::read_from_i24(&mut self.reader, self.data_pos + from * 3, buf).await
             } else if self.fmt.bit_depth == 32 {
-                let mut samples = vec![0; buf.len() * 4];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 4) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i32_i = i * 4;
-                    buf[i] = i16::from_f32(f32::from_le_bytes([
-                        samples[i32_i],
-                        samples[i32_i + 1],
-                        samples[i32_i + 2],
-                        samples[i32_i + 3],
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                i16::read_from_f32(&mut self.reader, self.data_pos + from * 4, buf).await
             } else {
                 return Err(ReadError::Parser(Error::UnsupportedFormat(
                     self.fmt.audio_format.to_u16(),
@@ -788,75 +890,13 @@ pub mod asynch {
             buf: &mut [i32],
         ) -> Result<(), ReadError<R::Error>> {
             if self.fmt.bit_depth == 8 {
-                let mut samples = vec![0; buf.len()];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    buf[i] = i32::from_u8(samples[i]);
-                    i += 1;
-                }
-                Ok(())
+                i32::read_from_u8(&mut self.reader, self.data_pos + from, buf).await
             } else if self.fmt.bit_depth == 16 {
-                let mut samples = vec![0; buf.len() * 2];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 2) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i16_i = i * 2;
-                    buf[i] =
-                        i32::from_i16(i16::from_le_bytes([samples[i16_i], samples[i16_i + 1]]));
-                    i += 1;
-                }
-                Ok(())
+                i32::read_from_i16(&mut self.reader, self.data_pos + from * 2, buf).await
             } else if self.fmt.bit_depth == 24 {
-                let mut samples = vec![0; buf.len() * 3];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 3) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let sign = samples[i * 3 + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-
-                    let i32_sample = i32::from_le_bytes([
-                        samples[i * 3],
-                        samples[i * 3 + 1],
-                        samples[i * 3 + 2],
-                        sign_byte,
-                    ]);
-                    let i24_sample = i32::from_i32(i32_sample);
-                    buf[i] = i24_sample;
-                    i += 1;
-                }
-                Ok(())
+                i32::read_from_i24(&mut self.reader, self.data_pos + from * 3, buf).await
             } else if self.fmt.bit_depth == 32 {
-                let mut samples = vec![0; buf.len() * 4];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 4) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i32_i = i * 4;
-                    buf[i] = i32::from_f32(f32::from_le_bytes([
-                        samples[i32_i],
-                        samples[i32_i + 1],
-                        samples[i32_i + 2],
-                        samples[i32_i + 3],
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                i32::read_from_f32(&mut self.reader, self.data_pos + from * 4, buf).await
             } else {
                 return Err(ReadError::Parser(Error::UnsupportedFormat(
                     self.fmt.audio_format.to_u16(),
@@ -871,90 +911,13 @@ pub mod asynch {
             buf: &mut [f32],
         ) -> Result<(), ReadError<R::Error>> {
             if self.fmt.bit_depth == 8 {
-                let mut samples = vec![0; buf.len()];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    buf[i] = f32::from_u8(samples[i]);
-                    i += 1;
-                }
-                Ok(())
+                f32::read_from_u8(&mut self.reader, self.data_pos + from, buf).await
             } else if self.fmt.bit_depth == 16 {
-                let mut samples = vec![0; buf.len() * 2];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 2) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    buf[i] =
-                        f32::from_i16(i16::from_le_bytes([samples[i * 2], samples[i * 2 + 1]]));
-                    i += 1;
-                }
-                Ok(())
+                f32::read_from_i16(&mut self.reader, self.data_pos + from * 2, buf).await
             } else if self.fmt.bit_depth == 24 {
-                let mut samples = vec![0; buf.len() * 3];
-                self.reader
-                    .seek(SeekFrom::Start((self.data_pos + from * 3) as u64))
-                    .await
-                    .map_err(|e| ReadError::Reader(e))?;
-                self.reader.read_exact(&mut samples).await?;
-                let mut i = 0;
-                while i < buf.len() {
-                    let i32_i = i * 3;
-                    let sign = samples[i32_i + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-
-                    buf[i] = f32::from_i32(i32::from_le_bytes([
-                        samples[i32_i],
-                        samples[i32_i + 1],
-                        samples[i32_i + 2],
-                        sign_byte,
-                    ]));
-                    i += 1;
-                }
-                Ok(())
+                f32::read_from_i24(&mut self.reader, self.data_pos + from * 3, buf).await
             } else if self.fmt.bit_depth == 32 {
-                #[cfg(target_endian = "little")]
-                {
-                    // Optimized path for little-endian 32-bit float reads
-                    let bytes = unsafe {
-                        core::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 4)
-                    };
-                    self.reader
-                        .seek(SeekFrom::Start((self.data_pos + from * 4) as u64))
-                        .await
-                        .map_err(|e| ReadError::Reader(e))?;
-                    self.reader.read_exact(bytes).await?;
-                    Ok(())
-                }
-                #[cfg(not(target_endian = "little"))]
-                {
-                    // Fallback for non-little-endian systems
-                    let mut samples = vec![0; buf.len() * 4];
-                    self.reader
-                        .seek(SeekFrom::Start((self.data_pos + from * 4) as u64))
-                        .await
-                        .map_err(|e| ReadError::Reader(e))?;
-                    self.reader.read_exact(&mut samples).await?;
-                    let mut i = 0;
-                    while i < buf.len() {
-                        let i32_i = i * 4;
-                        buf[i] = f32::from_le_bytes([
-                            samples[i32_i],
-                            samples[i32_i + 1],
-                            samples[i32_i + 2],
-                            samples[i32_i + 3],
-                        ]);
-                        i += 1;
-                    }
-                    Ok(())
-                }
+                f32::read_from_f32(&mut self.reader, self.data_pos + from * 4, buf).await
             } else {
                 return Err(ReadError::Parser(Error::UnsupportedFormat(
                     self.fmt.audio_format.to_u16(),
