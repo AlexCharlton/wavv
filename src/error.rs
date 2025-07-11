@@ -34,12 +34,12 @@ pub enum ReadError<E: core::fmt::Debug> {
     UnexpectedEof,
 }
 
-#[cfg(feature = "std")]
-impl<E: core::fmt::Debug> std::error::Error for ReadError<E> {}
+#[cfg(feature = "io")]
+impl<E: core::fmt::Debug> core::error::Error for ReadError<E> {}
 
-#[cfg(feature = "std")]
-impl<E: core::fmt::Debug> std::fmt::Display for ReadError<E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#[cfg(feature = "io")]
+impl<E: core::fmt::Debug> core::fmt::Display for ReadError<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
