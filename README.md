@@ -53,3 +53,4 @@ fn main() {
 - When `std`, don't use embedded_io traits, use the std ones
   - Implies a `no_std` trait
   - Or maybe: `incremental_std`, `incremental_async_std`, `incremental_no_std` and `incremental_async_no_std`
+  - Use https://crates.io/crates/dasp_sample ?

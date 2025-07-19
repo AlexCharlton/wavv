@@ -127,9 +127,9 @@ impl Wav {
     /// let f64_samples: Vec<f64> = wav.iter_as::<f64>().collect();
     /// assert_eq!(f64_samples, vec![1.0 / 32768.0, 2.0 / 32768.0, 3.0 / 32768.0, -1.0 / 32768.0]);
     ///
-    /// // Iterate as i32 (preserving original values)
+    /// // Iterate as i32
     /// let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
-    /// assert_eq!(i32_samples, vec![1, 2, 3, -1]);
+    /// assert_eq!(i32_samples, vec![1 << 16, 2 << 16, 3 << 16, -1 << 16]);
     /// ```
     pub fn iter_as<T>(&self) -> WavIterator<T>
     where
@@ -315,9 +315,9 @@ mod tests {
             wav.data,
             Data::BitDepth24(vec![
                 0x00000000, // sample 1
-                0x00172400, // sample 2
-                0x003cf31e, // sample 3
-                0x00143c13, // sample 4
+                0x17240000, // sample 2
+                0x3cf31e00, // sample 3
+                0x143c1300, // sample 4
             ])
         );
     }
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(wav.fmt.bit_depth, 24);
         assert_eq!(wav.fmt.num_channels, 1);
 
-        assert_eq!(wav.data, Data::BitDepth24(vec![-1]));
+        assert_eq!(wav.data, Data::BitDepth24(vec![-256]));
     }
 
     #[test]
@@ -445,7 +445,7 @@ mod tests {
 
         // Test as i32 (converted from i16)
         let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
-        assert_eq!(i32_samples, vec![1, 2, 3, -1]);
+        assert_eq!(i32_samples, vec![1 << 16, 2 << 16, 3 << 16, -1 << 16]);
 
         // Test with 8-bit data
         let wav_8bit = Wav::from_data(Data::BitDepth8(vec![128, 255, 0]), 48_000, 1);

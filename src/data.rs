@@ -11,7 +11,7 @@ pub enum Data {
     BitDepth8(Vec<u8>),
     /// 16 bit audio
     BitDepth16(Vec<i16>),
-    /// 24 bit audio
+    /// 24 bit audio, stored scaled to i32
     BitDepth24(Vec<i32>),
     /// 32 bit float audio
     Float32(Vec<f32>),
@@ -40,14 +40,11 @@ impl Data {
                     s.push(sample);
                 }
                 Data::BitDepth24(s) => {
-                    let sign = chunk.bytes[pos + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-
                     let sample = i32::from_le_bytes([
+                        0,
                         chunk.bytes[pos],
                         chunk.bytes[pos + 1],
                         chunk.bytes[pos + 2],
-                        sign_byte,
                     ]);
 
                     s.push(sample);
@@ -87,7 +84,7 @@ impl Data {
             Data::BitDepth24(samples) => {
                 for s in samples {
                     let b = s.to_le_bytes();
-                    bytes.extend_from_slice(&[b[0], b[1], b[2]]);
+                    bytes.extend_from_slice(&[b[1], b[2], b[3]]);
                 }
             }
             Data::Float32(samples) => {
@@ -136,8 +133,11 @@ mod tests {
 
     #[test]
     fn to_24_bit() {
-        let data = Data::BitDepth24(vec![1, 2, 3, 4]);
-        assert_eq!(data.to_chunk().bytes, &[1, 0, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
+        let data = Data::BitDepth24(vec![0xBA000000, -0xBA000000, 0x5A000000, -0x5A000000]);
+        assert_eq!(
+            data.to_chunk().bytes,
+            &[0x00, 0x00, 0xBA, 0x00, 0x00, 0x46, 0x00, 0x00, 0x5A, 0x00, 0x00, 0xA6]
+        );
     }
 
     #[test]
@@ -212,7 +212,10 @@ mod tests {
 
         let data = Data::from_chunk(&fmt, &Chunk::from_bytes(&bytes).unwrap()).unwrap();
 
-        assert_eq!(data, Data::BitDepth24(vec![8_388_607, -8_388_608, 1, -1]));
+        assert_eq!(
+            data,
+            Data::BitDepth24(vec![2_147_483_392, -2_147_483_648, 256, -256])
+        );
     }
 
     #[test]

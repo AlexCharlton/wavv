@@ -122,13 +122,11 @@ where
             24 => {
                 let sample = if self.read_pos + 2 < self.buffer_size {
                     // No wrap-around needed
-                    let sign = self.buffer[self.read_pos + 2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
                     let sample = i32::from_le_bytes([
+                        0,
                         self.buffer[self.read_pos],
                         self.buffer[self.read_pos + 1],
                         self.buffer[self.read_pos + 2],
-                        sign_byte,
                     ]);
                     self.read_pos = (self.read_pos + 3) % self.buffer_size;
                     self.data_available -= 3;
@@ -140,9 +138,7 @@ where
                         self.buffer[(self.read_pos + 1) % self.buffer_size],
                         self.buffer[(self.read_pos + 2) % self.buffer_size],
                     ];
-                    let sign = bytes[2] >> 7;
-                    let sign_byte = if sign == 1 { 0xff } else { 0x0 };
-                    let sample = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], sign_byte]);
+                    let sample = i32::from_le_bytes([0, bytes[0], bytes[1], bytes[2]]);
                     self.read_pos = (self.read_pos + 3) % self.buffer_size;
                     self.data_available -= 3;
                     sample
@@ -596,15 +592,9 @@ pub mod asynch {
             let mut i = 0;
             while i < buf.len() {
                 let i24_i = i * 3;
-                let sign = samples[i24_i + 2] >> 7;
-                let sign_byte = if sign == 1 { 0xff } else { 0x0 };
 
-                let i32_sample = i32::from_le_bytes([
-                    samples[i24_i],
-                    samples[i24_i + 1],
-                    samples[i24_i + 2],
-                    sign_byte,
-                ]);
+                let i32_sample =
+                    i32::from_le_bytes([0, samples[i24_i], samples[i24_i + 1], samples[i24_i + 2]]);
                 buf[i] = Self::from_i32(i32_sample);
                 i += 1;
             }
@@ -1090,7 +1080,7 @@ mod tests {
     #[test]
     fn test_24bit_audio() {
         // Test with 24-bit audio
-        let original_samples = vec![1_000_000, -1_000_000, 500_000, -500_000];
+        let original_samples = vec![0xBA0000, -0xBA0000, 0x5A0000, -0x5A0000];
         let wav = crate::Wav::from_data(Data::BitDepth24(original_samples.clone()), 96_000, 2);
         let bytes = wav.to_bytes();
 

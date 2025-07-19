@@ -35,7 +35,7 @@
 //! // Iterate as normalized f64 samples ([-1.0, 1.0])
 //! let f64_samples: Vec<f64> = wav.iter_as::<f64>().collect();
 //!
-//! // Iterate as i32 samples (preserving original values)
+//! // Iterate as i32 samples
 //! let i32_samples: Vec<i32> = wav.iter_as::<i32>().collect();
 //!
 //! // You can also work with 32-bit float WAV files directly
@@ -115,7 +115,7 @@ pub use wav::{Wav, WavIterator};
 
 #[cfg(feature = "io")]
 mod incremental;
-#[cfg(feature = "io")]
-pub use incremental::{asynch, IncrementalWav, IncrementalWavIterator};
 #[cfg(feature = "std")]
 pub use incremental::{File, FileError};
+#[cfg(feature = "io")]
+pub use incremental::{IncrementalWav, IncrementalWavIterator, asynch};

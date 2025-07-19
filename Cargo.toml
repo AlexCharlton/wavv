@@ -2,7 +2,7 @@
 name = "wavv"
 version = "0.2.0"
 authors = ["Samuel Leeuwenburg <samleeuwenburg@gmail.com>"]
-edition = "2018"
+edition = "2024"
 description = "no_std library for parsing and creating wav files"
 repository = "https://github.com/samuelleeuwenburg/wavv"
 documentation = "https://docs.rs/wavv"
@@ -17,7 +17,7 @@ io = ["embedded-io", "embedded-io-async"]
 [dependencies]
 embedded-io = { version = "0.6", optional = true }
 embedded-io-async = { version = "0.6", optional = true }
-tokio = { version = "1", default_features = false, features = [
+tokio = { version = "1", default-features = false, features = [
     "fs",
     "io-util",
 ], optional = true }

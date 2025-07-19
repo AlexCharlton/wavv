@@ -24,7 +24,7 @@ impl FromWavSample for f32 {
         sample as f32 / 32768.0
     }
     fn from_i32(sample: i32) -> Self {
-        sample as f32 / 8388608.0
+        sample as f32 / 2_147_483_648.0
     }
     fn from_f32(sample: f32) -> Self {
         sample
@@ -46,7 +46,7 @@ impl FromWavSample for f64 {
         sample as f64 / 32768.0
     }
     fn from_i32(sample: i32) -> Self {
-        sample as f64 / 8388608.0
+        sample as f64 / 2_147_483_648.0
     }
     fn from_f32(sample: f32) -> Self {
         sample as f64
@@ -68,7 +68,7 @@ impl FromWavSample for u8 {
         ((sample as f32 / 32768.0) * 255.0 + 128.0).clamp(0.0, 255.0) as u8
     }
     fn from_i32(sample: i32) -> Self {
-        ((sample as f32 / 8388608.0) * 255.0 + 128.0).clamp(0.0, 255.0) as u8
+        ((sample as f32 / 2_147_483_648.0) * 255.0 + 128.0).clamp(0.0, 255.0) as u8
     }
     fn from_f32(sample: f32) -> Self {
         ((sample + 1.0) * 127.5).clamp(0.0, 255.0) as u8
@@ -90,7 +90,7 @@ impl FromWavSample for i16 {
         sample
     }
     fn from_i32(sample: i32) -> Self {
-        (sample as f32 / 8388608.0 * 32768.0).clamp(-32768.0, 32767.0) as i16
+        (sample >> 16) as i16
     }
     fn from_f32(sample: f32) -> Self {
         (sample * 32767.5).clamp(-32767.5, 32767.5) as i16
@@ -106,16 +106,18 @@ impl FromWavSample for i16 {
 
 impl FromWavSample for i32 {
     fn from_u8(sample: u8) -> Self {
-        ((sample as f32 - 128.0) / 128.0 * 8388608.0).clamp(-8388608.0, 8388607.0) as i32
+        (((sample as f32 - 128.0) / 128.0 * 2_147_483_648.0)
+            .clamp(-2_147_483_648.0, 2_147_483_647.0) as i32)
+            << 8
     }
     fn from_i16(sample: i16) -> Self {
-        sample as i32
+        (sample as i32) << 16
     }
     fn from_i32(sample: i32) -> Self {
         sample
     }
     fn from_f32(sample: f32) -> Self {
-        (sample * 8388607.5).clamp(-8388607.5, 8388607.5) as i32
+        (sample * 2_147_483_647.5).clamp(-2_147_483_647.5, 2_147_483_647.5) as i32
     }
 
     fn zero() -> Self {
@@ -141,8 +143,8 @@ mod tests {
         assert_eq!(f32::from_i16(-32768), -1.0);
 
         assert_eq!(f32::from_i32(0), 0.0);
-        assert_eq!(f32::from_i32(8388607), 0.9999999);
-        assert_eq!(f32::from_i32(-8388608), -1.0);
+        assert_eq!(f32::from_i32(2147483647), 1.0);
+        assert_eq!(f32::from_i32(-2147483648), -1.0);
     }
 
     #[test]
@@ -187,7 +189,7 @@ mod tests {
     #[test]
     fn test_i32_conversions_from_f32() {
         assert_eq!(i32::from_f32(0.0), 0);
-        assert_eq!(i32::from_f32(1.0), 8388607);
-        assert_eq!(i32::from_f32(-1.0), -8388607);
+        assert_eq!(i32::from_f32(1.0), 2_147_483_647);
+        assert_eq!(i32::from_f32(-1.0), -2_147_483_648);
     }
 }
