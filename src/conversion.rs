@@ -1,5 +1,8 @@
 /// Trait for converting WAV samples to a generic numeric type
 pub trait FromWavSample: Sized + Copy {
+    /// The zero value for the target type
+    const ZERO: Self;
+
     /// Convert a u8 sample to the target type
     fn from_u8(sample: u8) -> Self;
     /// Convert a i16 sample to the target type
@@ -9,14 +12,14 @@ pub trait FromWavSample: Sized + Copy {
     /// Convert a f32 sample to the target type
     fn from_f32(sample: f32) -> Self;
 
-    /// The zero value for the target type
-    fn zero() -> Self;
     /// Add two samples together without overflow
     fn add(self, other: Self) -> Self;
 }
 
 // Implement for common numeric types
 impl FromWavSample for f32 {
+    const ZERO: Self = 0.0;
+
     fn from_u8(sample: u8) -> Self {
         (sample as f32 - 128.0) / 128.0
     }
@@ -30,15 +33,14 @@ impl FromWavSample for f32 {
         sample
     }
 
-    fn zero() -> Self {
-        0.0
-    }
     fn add(self, other: Self) -> Self {
         self + other
     }
 }
 
 impl FromWavSample for f64 {
+    const ZERO: Self = 0.0;
+
     fn from_u8(sample: u8) -> Self {
         (sample as f64 - 128.0) / 128.0
     }
@@ -52,15 +54,14 @@ impl FromWavSample for f64 {
         sample as f64
     }
 
-    fn zero() -> Self {
-        0.0
-    }
     fn add(self, other: Self) -> Self {
         self + other
     }
 }
 
 impl FromWavSample for u8 {
+    const ZERO: Self = 0;
+
     fn from_u8(sample: u8) -> Self {
         sample
     }
@@ -74,15 +75,14 @@ impl FromWavSample for u8 {
         ((sample + 1.0) * 127.5).clamp(0.0, 255.0) as u8
     }
 
-    fn zero() -> Self {
-        0
-    }
     fn add(self, other: Self) -> Self {
         self.saturating_add(other)
     }
 }
 
 impl FromWavSample for i16 {
+    const ZERO: Self = 0;
+
     fn from_u8(sample: u8) -> Self {
         ((sample as f32 - 128.0) / 128.0 * 32768.0).clamp(-32768.0, 32767.0) as i16
     }
@@ -96,15 +96,14 @@ impl FromWavSample for i16 {
         (sample * 32767.5).clamp(-32767.5, 32767.5) as i16
     }
 
-    fn zero() -> Self {
-        0
-    }
     fn add(self, other: Self) -> Self {
         self.saturating_add(other)
     }
 }
 
 impl FromWavSample for i32 {
+    const ZERO: Self = 0;
+
     fn from_u8(sample: u8) -> Self {
         (((sample as f32 - 128.0) / 128.0 * 2_147_483_648.0)
             .clamp(-2_147_483_648.0, 2_147_483_647.0) as i32)
@@ -120,9 +119,6 @@ impl FromWavSample for i32 {
         (sample * 2_147_483_647.5).clamp(-2_147_483_647.5, 2_147_483_647.5) as i32
     }
 
-    fn zero() -> Self {
-        0
-    }
     fn add(self, other: Self) -> Self {
         self.saturating_add(other)
     }
